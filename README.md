@@ -6,21 +6,33 @@ https://github.com/imbcmdth/pyrowave (branch `webgpu`), compiled with wasi-sdk
 to a wasm32-wasip2 component that reaches the GPU through `wasi:webgpu`. The
 sidecar hosts that interface for a module granted `-gpu`.
 
-For now the package has one module, a round trip: each frame is encoded at a
-chosen size and decoded again on the GPU, and the decoded picture is what comes
-out. It needs no codec support in the dialect and shows what a rate costs.
-Encoder and decoder modules, a codec id in NUT and the dialect spelling
-(`WITH (video_codec => ffrwd.pyrowave.encode(...))`) come next.
+The package has two modules:
+
+* `modules/pyrowave.wasm`, the codec: an encoder and a decoder in one
+  component, on ffrwd:av 0.18.0's `codec-module` world. The lib calls them
+  `encode` and `decode`; the codec is `pyrowave` and its tag on the wire is
+  `PYRW`.
+* `modules/pyrowave_roundtrip.wasm`, a round trip on ffrwd:av 0.17.0: each
+  frame is encoded at a chosen size and decoded again, and the decoded
+  picture is what comes out. It needs no codec support in the dialect and
+  shows what a rate costs.
 
 ## Layout
 
+* `codec/`: the codec module. `codec/src/pyrowave_codec.cpp` holds the
+  extradata header, the params, the size per frame and the GPU encoder and
+  decoder; `codec/src/codec.cpp` is the glue to the `encoder` and `decoder`
+  exports. `codec/wit/deps/ffrwd-av/av.wit` is the CLI's `sidecar/wit/av.wit`
+  at 0.18.0, and `codec/generated/` is wit-bindgen's C output for it.
+  `codec/test/` is a native test of the same code (see Testing).
 * `module/`: the round-trip filter, C++ on ffrwd:av 0.17.0's `video-module`
   world (`module/wit/deps/ffrwd-av/av.wit` is the sidecar's `wit/av.wit` at
   0.17.0). `module/generated/` is wit-bindgen's C output for it.
 * `webgpu-wasi/`: `webgpu.h` implemented over `wasi:webgpu@0.0.1`, the part any
   C or C++ module needs to use the GPU. Self-contained, meant to move to a
   repository of its own; see its README.
-* `src/pyrowave.sql`: the lib, `roundtrip` and `roundtrip_stats`.
+* `src/codec.sql`: the lib's `encode` and `decode`. `src/pyrowave.sql`:
+  `roundtrip` and `roundtrip_stats`.
 * `build.sh`, `CMakeLists.txt`: the build.
 
 ## Building
@@ -32,19 +44,98 @@ checkout of the PyroWave fork (built against 5e80f92):
 WASI_SDK=/path/to/wasi-sdk PYROWAVE_DIR=/path/to/pyrowave sh build.sh
 ```
 
-The module lands in `modules/pyrowave_roundtrip.wasm`. The PyroWave fork is
-used as is: its `webgpu/` CMake takes any `webgpu` target defined before it,
-which is how the shim stands in for wgpu-native.
+The modules land in `modules/`. The PyroWave fork is used as is: its
+`webgpu/` CMake takes any `webgpu` target defined before it, which is how the
+shim stands in for wgpu-native.
+
+Regenerating the codec's bindings, from `codec/`, with wit-bindgen-cli 0.62:
+
+```
+wit-bindgen c wit --world codec --out-dir generated
+```
+
+## The codec
+
+`pyrowave.wasm` exports `ffrwd:av/encoder@0.18.0` and
+`ffrwd:av/decoder@0.18.0` and imports `wasi:webgpu/webgpu@0.0.1` beside
+WASI 0.2. Both describe themselves as `pyrowave` with pixel formats
+`yuv420p` and `yuv444p`. The encoder's codec is `pyrowave`, its fourcc `PYRW`,
+and its delay, decode delay and frame samples are all 0: PyroWave is intra
+only, so every frame leaves as one packet in the call that brings it, and
+every packet is a keyframe with `dts` equal to `pts` and the frame's own
+duration. The decoder reads `PYRW` with a delay of 0 and answers each packet
+with one frame at the packet's `pts` and duration.
+
+Each instance opens its GPU device at its first `init` and keeps it; an
+instance that runs both an encoder and a decoder shares the one device.
+
+### Encoder params
+
+JSON, as the lib's `encode` passes them:
+
+* `bitrate`: bits per second (default 200000000). A frame's size is the
+  bitrate over the frame's duration: the frame's own `duration`, else the gap
+  to the next frame's `pts` in the same call, else the last duration seen,
+  else one tick of the time base when the time base reads as a frame rate (1
+  to 240 per second). A frame with none of these is refused with a message
+  asking for `bytes_per_frame`.
+* `bytes_per_frame`: a fixed size for every frame, from 1024 bytes. Wins over
+  `bitrate` when set.
+
+Either may be left out or null. Sizes are floored at 1024 bytes and capped at
+twice the raw frame; the default bitrate is near lossless at 720p30 (about
+613 kB a frame, 68 dB).
+
+The decoder takes no params: empty, or `{}`.
+
+### Extradata
+
+The coded stream's extradata is a 16-byte header, little-endian, which the
+decoder needs before the first packet to open at the right size and chroma
+layout:
+
+| offset | size | field |
+|---|---|---|
+| 0 | 4 | magic, `PYRW` |
+| 4 | 1 | version, 1 |
+| 5 | 1 | header size in bytes, 16; a reader skips bytes past what it knows |
+| 6 | 1 | chroma: 0 is 4:2:0, 1 is 4:4:4 (the bitstream's `chroma_resolution`) |
+| 7 | 1 | reserved, 0 |
+| 8 | 4 | width, u32 |
+| 12 | 4 | height, u32 |
+
+A 1280x720 4:2:0 stream's is `50595257 01 10 00 00 00050000 d0020000`. The
+decoder refuses another magic or version, a short header, and a width or
+height other than the one the coded stream declares. With no extradata at all
+it opens at the coded stream's size as 4:2:0; a 4:4:4 stream then fails at its
+first packet, whose own sequence header says which it is.
+
+A packet is one whole PyroWave frame: the bitstream of `bitstream.md` in the
+PyroWave repository, one sequence header and the frame's blocks, nothing
+added.
 
 ## Running
 
-The module imports `wasi:webgpu`, so the sidecar refuses to run it without
-the grant:
+Both modules import `wasi:webgpu`, so the sidecar refuses to run either
+without the grant (`-gpu <module>`).
+
+The codec is written in a query where a codec name goes, and a stream it
+wrote is read back by naming the decoder:
 
 ```
-ffrwd-wasm -gpu modules/pyrowave_roundtrip.wasm -f nut -i pipe:0 \
-  -m modules/pyrowave_roundtrip.wasm -params '{"bytes_per_frame":60000}' \
-  -f nut pipe:1 -f ndjson rows.ndjson < in.nut > out.nut
+COPY (SELECT f.video[1] FROM input('in.nut') f) TO 'out.nut'
+  WITH (video_codec => ffrwd.pyrowave.encode(bytes_per_frame => 60000));
+COPY (SELECT f.video[1] FROM input('out.nut', decoder => ffrwd.pyrowave.decode()) f)
+  TO 'back.y4m';
+```
+
+That needs an ffrwd whose sidecar hosts ffrwd:av 0.18.0's `encoder` and
+`decoder`, which has not shipped yet.
+
+The round trip runs on the sidecar as it is:
+
+```
+ffrwd-wasm -gpu modules/pyrowave_roundtrip.wasm -f nut -i pipe:0   -m modules/pyrowave_roundtrip.wasm -params '{"bytes_per_frame":60000}'   -f nut pipe:1 -f ndjson rows.ndjson < in.nut > out.nut
 ```
 
 Params: `bytes_per_frame`, the encoder's budget per frame (default 60000, at
@@ -57,7 +148,50 @@ yet: until the CLI grants it, the package does not link, and a query calling
 the module is refused by the sidecar with
 `imports wasi:webgpu, and this run grants it no GPU; grant it with -gpu <module>`.
 
+## Testing
+
+`codec/test/` builds the codec's own sources (`codec.cpp`,
+`pyrowave_codec.cpp` and the generated bindings) natively against
+wgpu-native and calls the exports the way a host does, owning and freeing
+what crosses. `pyrowave-codec-test checks` covers the describes, the params,
+the extradata and the refusals; `pyrowave-codec-test roundtrip in.y4m out.y4m`
+encodes a y4m through `encode`, hands the packets and the extradata to
+`decode`, and writes what comes back. See `codec/test/CMakeLists.txt` for the
+build.
+
 ## Measured
+
+### The codec
+
+RTX 4090, Windows. `pyrowave.wasm` itself, run on wasmtime 48 with the
+sidecar's vendored wasi:webgpu host (wgpu 29, Vulkan) by a stand-in for the
+host that is not written yet, and the native test on wgpu-native v29
+(Vulkan), both over the same 150 frames of `es.mp4`. Every decoded frame is
+bit for bit what the fork's own `pyrowave-webgpu-encode` and `-decode` make
+at the same size (framemd5), in 4:2:0 at 720p and 1080p and in 4:4:4 at
+720p (`testsrc2`, 30 frames).
+
+| stream | params | mean bytes per frame | Y / U / V (dB) |
+|---|---|---|---|
+| 720p 4:2:0 | `bytes_per_frame` 60000 | 59959.3 | 32.798 / 41.097 / 38.020 |
+| 720p 4:2:0 | `bitrate` 14400000 at 1/30 | 59959.3 | the same frames |
+| 720p 4:2:0 | defaults (200 Mb/s) | 613347.2 | 68.286 / 67.344 / 67.132 |
+| 1080p 4:2:0 | `bytes_per_frame` 120000 | 119962.1 | 38.954 / 44.347 / 42.237 |
+| 720p 4:4:4 | `bytes_per_frame` 120000 | 119965.1 | 44.003 / 44.393 / 44.170 |
+
+`bitrate` 14400000 at 30 frames a second is 60000 bytes a frame, and gives the
+same packets whether the size comes from the frames' durations, from the gaps
+between their `pts` or from a 1/30 time base, at 1/30 or 1/90000, one frame
+per call or several.
+
+Per frame at 720p, 60000 bytes, one frame per call, measured by the stand-in
+host around each call (so including the copies across the component
+boundary): encode 0.73 ms and decode 0.88 ms; at 1080p and 120000 bytes,
+1.45 and 1.81 ms. The native test takes 0.42 / 0.37 ms and 0.78 / 0.84 ms.
+Opening the device and compiling the encode pipelines takes about 60 ms per
+instance; a decoder in the same instance reuses the device.
+
+### The round trip
 
 RTX 4090, Windows, the sidecar's wgpu on Vulkan, 150 frames of real footage
 (`es.mp4`) at 1280x720 yuv420p, compared with the source by ffmpeg's psnr
