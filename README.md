@@ -140,9 +140,7 @@ uv venv ffrwd-0.24.0
 uv pip install --python ffrwd-0.24.0 ffrwd==0.24.0
 ```
 
-The package publishes private, so installing it from the registry needs a
-token that can read the `ffrwd` namespace (`ffrwd login`), and then, in a
-project:
+The package is public in the registry. In a project:
 
 ```
 ffrwd install ffrwd/pyrowave
