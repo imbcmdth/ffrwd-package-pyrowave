@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Exported Functions from `ffrwd:av/filter@0.17.0`
+// Exported Functions from `ffrwd:av/filter@0.18.0`
 
-__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.17.0#describe")))
+__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.18.0#describe")))
 void __wasm_export_exports_ffrwd_av_filter_describe_post_return(uint8_t * arg0) {
   if ((*((size_t*) (arg0 + sizeof(void*)))) > 0) {
     free(*((uint8_t **) (arg0 + 0)));
@@ -75,7 +75,7 @@ void __wasm_export_exports_ffrwd_av_filter_describe_post_return(uint8_t * arg0) 
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.17.0#init")))
+__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.18.0#init")))
 void __wasm_export_exports_ffrwd_av_filter_init_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
@@ -90,7 +90,7 @@ void __wasm_export_exports_ffrwd_av_filter_init_post_return(uint8_t * arg0) {
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.17.0#set-params")))
+__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.18.0#set-params")))
 void __wasm_export_exports_ffrwd_av_filter_set_params_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
@@ -106,7 +106,7 @@ void __wasm_export_exports_ffrwd_av_filter_set_params_post_return(uint8_t * arg0
 }
 
 
-__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.17.0#process")))
+__attribute__((__weak__, __export_name__("cabi_post_ffrwd:av/filter@0.18.0#process")))
 void __wasm_export_exports_ffrwd_av_filter_process_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
@@ -319,6 +319,11 @@ void ffrwd_av_types_packet_free(ffrwd_av_types_packet_t *ptr) {
   roundtrip_list_u8_free(&ptr->data);
 }
 
+void ffrwd_av_types_raw_frame_free(ffrwd_av_types_raw_frame_t *ptr) {
+  roundtrip_option_s64_free(&ptr->duration);
+  roundtrip_list_u8_free(&ptr->data);
+}
+
 void ffrwd_av_types_list_packet_free(ffrwd_av_types_list_packet_t *ptr) {
   size_t list_len = ptr->len;
   if (list_len > 0) {
@@ -408,7 +413,7 @@ void roundtrip_string_free(roundtrip_string_t *ret) {
 
 // Component Adapters
 
-__attribute__((__export_name__("ffrwd:av/filter@0.17.0#describe")))
+__attribute__((__export_name__("ffrwd:av/filter@0.18.0#describe")))
 uint8_t * __wasm_export_exports_ffrwd_av_filter_describe(void) {
   exports_ffrwd_av_filter_meta_t ret;
   exports_ffrwd_av_filter_describe(&ret);
@@ -434,7 +439,7 @@ uint8_t * __wasm_export_exports_ffrwd_av_filter_describe(void) {
   return ptr;
 }
 
-__attribute__((__export_name__("ffrwd:av/filter@0.17.0#init")))
+__attribute__((__export_name__("ffrwd:av/filter@0.18.0#init")))
 uint8_t * __wasm_export_exports_ffrwd_av_filter_init(uint8_t * arg) {
   roundtrip_option_f64_t option;
   switch ((int32_t) *((uint8_t*) (arg + (16+6*sizeof(void*))))) {
@@ -479,7 +484,7 @@ uint8_t * __wasm_export_exports_ffrwd_av_filter_init(uint8_t * arg) {
   return ptr;
 }
 
-__attribute__((__export_name__("ffrwd:av/filter@0.17.0#set-params")))
+__attribute__((__export_name__("ffrwd:av/filter@0.18.0#set-params")))
 uint8_t * __wasm_export_exports_ffrwd_av_filter_set_params(uint8_t * arg, size_t arg0) {
   roundtrip_string_t arg1 = (roundtrip_string_t) { (uint8_t*)(arg), (arg0) };
   exports_ffrwd_av_filter_result_void_string_t ret;
@@ -499,13 +504,13 @@ uint8_t * __wasm_export_exports_ffrwd_av_filter_set_params(uint8_t * arg, size_t
   return ptr;
 }
 
-__attribute__((__export_name__("ffrwd:av/filter@0.17.0#frame-independent")))
+__attribute__((__export_name__("ffrwd:av/filter@0.18.0#frame-independent")))
 int32_t __wasm_export_exports_ffrwd_av_filter_frame_independent(void) {
   bool ret = exports_ffrwd_av_filter_frame_independent();
   return ret;
 }
 
-__attribute__((__export_name__("ffrwd:av/filter@0.17.0#process")))
+__attribute__((__export_name__("ffrwd:av/filter@0.18.0#process")))
 uint8_t * __wasm_export_exports_ffrwd_av_filter_process(int32_t arg, int32_t arg0, double arg1, uint8_t * arg2, size_t arg3) {
   exports_ffrwd_av_filter_frame_info_t arg4 = (exports_ffrwd_av_filter_frame_info_t) {
     (uint32_t) (uint32_t) (arg),

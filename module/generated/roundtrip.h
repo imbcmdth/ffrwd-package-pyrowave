@@ -239,6 +239,18 @@ typedef struct ffrwd_av_types_packet_t {
   roundtrip_list_u8_t   data;
 } ffrwd_av_types_packet_t;
 
+// One raw frame crossing a codec: a video frame's pixels in the
+// instance's pix-fmt, or a run of interleaved audio samples in its
+// sample-fmt. Shared between `encoder` and `decoder`.
+typedef struct ffrwd_av_types_raw_frame_t {
+  // When it is presented, in the stream's time base.
+  int64_t   pts;
+  // How long it is presented, in the stream's time base; none where
+  // nothing settles it - unknown is never spelled 0.
+  roundtrip_option_s64_t   duration;
+  roundtrip_list_u8_t   data;
+} ffrwd_av_types_raw_frame_t;
+
 typedef struct {
   ffrwd_av_types_packet_t *ptr;
   size_t len;
@@ -361,7 +373,7 @@ typedef struct {
   } val;
 } exports_ffrwd_av_filter_result_void_string_t;
 
-// Exported Functions from `ffrwd:av/filter@0.17.0`
+// Exported Functions from `ffrwd:av/filter@0.18.0`
 void exports_ffrwd_av_filter_describe(exports_ffrwd_av_filter_meta_t *ret);
 bool exports_ffrwd_av_filter_init(uint32_t width, uint32_t height, roundtrip_string_t *pix_fmt, exports_ffrwd_av_filter_stream_info_t *stream_info, roundtrip_string_t *params, roundtrip_string_t *err);
 bool exports_ffrwd_av_filter_set_params(roundtrip_string_t *params, roundtrip_string_t *err);
@@ -413,6 +425,8 @@ void ffrwd_av_types_coded_stream_free(ffrwd_av_types_coded_stream_t *ptr);
 void roundtrip_option_s64_free(roundtrip_option_s64_t *ptr);
 
 void ffrwd_av_types_packet_free(ffrwd_av_types_packet_t *ptr);
+
+void ffrwd_av_types_raw_frame_free(ffrwd_av_types_raw_frame_t *ptr);
 
 void ffrwd_av_types_list_packet_free(ffrwd_av_types_list_packet_t *ptr);
 

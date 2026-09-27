@@ -1,9 +1,9 @@
-// The round-trip module: a frame filter on ffrwd:av 0.17.0's video-module
+// The round-trip module: a frame filter on ffrwd:av 0.18.0's video-module
 // world. Its GPU comes from wasi:webgpu, which the webgpu.h shim under
 // ../webgpu-wasi imports; the two worlds are merged when the component is
 // linked.
 package ffrwd:pyrowave;
 
 world roundtrip {
-  include ffrwd:av/video-module@0.17.0;
+  include ffrwd:av/video-module@0.18.0;
 }

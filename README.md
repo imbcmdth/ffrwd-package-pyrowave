@@ -12,10 +12,12 @@ The package has two modules:
   component, on ffrwd:av 0.18.0's `codec-module` world. The lib calls them
   `encode` and `decode`; the codec is `pyrowave` and its tag on the wire is
   `PYRW`.
-* `modules/pyrowave_roundtrip.wasm`, a round trip on ffrwd:av 0.17.0: each
-  frame is encoded at a chosen size and decoded again, and the decoded
-  picture is what comes out. It needs no codec support in the dialect and
-  shows what a rate costs.
+* `modules/pyrowave_roundtrip.wasm`, a round trip on ffrwd:av 0.18.0's
+  `video-module` world: each frame is encoded at a chosen size and decoded
+  again, and the decoded picture is what comes out. It shows what a rate
+  costs.
+
+Both need ffrwd 0.24.0 or newer (see Running).
 
 ## Layout
 
@@ -23,12 +25,12 @@ The package has two modules:
   extradata header, the params, the size per frame and the GPU encoder and
   decoder; `codec/src/codec.cpp` is the glue to the `encoder` and `decoder`
   exports. `codec/wit/deps/ffrwd-av/av.wit` is the CLI's `sidecar/wit/av.wit`
-  at 0.18.0 (the encoder's `init` taking `frame-rate`, as of the CLI's
-  423bae5), and `codec/generated/` is wit-bindgen's C output for it.
-  `codec/test/` is a native test of the same code (see Testing).
-* `module/`: the round-trip filter, C++ on ffrwd:av 0.17.0's `video-module`
-  world (`module/wit/deps/ffrwd-av/av.wit` is the sidecar's `wit/av.wit` at
-  0.17.0). `module/generated/` is wit-bindgen's C output for it.
+  at v0.24.0 (ffrwd:av 0.18.0, the same file `ffrwd/wasm` 0.18.0 ships), and
+  `codec/generated/` is wit-bindgen's C output for it. `codec/test/` is a
+  native test of the same code (see Testing).
+* `module/`: the round-trip filter, C++ on ffrwd:av 0.18.0's `video-module`
+  world (`module/wit/deps/ffrwd-av/av.wit` is the same v0.24.0 file).
+  `module/generated/` is wit-bindgen's C output for it.
 * `webgpu-wasi/`: `webgpu.h` implemented over `wasi:webgpu@0.0.1`, the part any
   C or C++ module needs to use the GPU. Self-contained, meant to move to a
   repository of its own; see its README.
@@ -49,10 +51,12 @@ The modules land in `modules/`. The PyroWave fork is used as is: its
 `webgpu/` CMake takes any `webgpu` target defined before it, which is how the
 shim stands in for wgpu-native.
 
-Regenerating the codec's bindings, from `codec/`, with wit-bindgen-cli 0.62:
+Regenerating the bindings with wit-bindgen-cli 0.62, from `codec/` and from
+`module/`:
 
 ```
 wit-bindgen c wit --world codec --out-dir generated
+wit-bindgen c wit --world roundtrip --out-dir generated
 ```
 
 ## The codec
@@ -125,14 +129,27 @@ added.
 Both modules import `wasi:webgpu`, so the sidecar refuses to run either
 without the grant (`-gpu <module>`).
 
-This needs an ffrwd whose sidecar hosts ffrwd:av 0.18.0's `encoder` and
-`decoder` with the `frame-rate` argument: the CLI's `codec-worlds` branch
-from 423bae5 on, not yet released. A module built on the earlier `init`,
-without `frame-rate`, does not instantiate there. ffrwd grants `-gpu` itself,
-from the module's own imports.
+This needs ffrwd 0.24.0 or newer, whose sidecar hosts ffrwd:av 0.18.0's
+`encoder` and `decoder` with the encoder's `init` taking `frame-rate`; the
+manifest's `ffrwd` key says `>=0.24.0`. This version's codec does not
+instantiate on an ffrwd from before that signature. ffrwd grants `-gpu`
+itself, from the module's own imports.
 
-Linking the package into a project, from the package's directory and then
-the project's:
+```
+uv venv ffrwd-0.24.0
+uv pip install --python ffrwd-0.24.0 ffrwd==0.24.0
+```
+
+The package publishes private, so installing it from the registry needs a
+token that can read the `ffrwd` namespace (`ffrwd login`), and then, in a
+project:
+
+```
+ffrwd install ffrwd/pyrowave
+```
+
+Or linked from a checkout, from the package's directory and then the
+project's:
 
 ```
 ffrwd link
@@ -174,11 +191,33 @@ ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('enc.nut') f) TO 'c
 ```
 
 A `.y4m` or `.mp4` output with no codec named is refused, since neither
-holds `PYRW`. The raw frames between ffmpeg and the sidecar are yuv420p, so
-ffrwd hands the encoder yuv420p even from a 4:4:4 source; 4:4:4 is coded only
-by a host that passes yuv444p frames, like the native test.
+holds `PYRW`.
 
-The round trip runs on the sidecar as it is:
+A 4:4:4 source is coded 4:4:4: ffrwd hands the encoder yuv444p, which it
+takes, and the extradata's chroma byte says so. `pix_fmt` names it outright,
+and reads it back as yuv444p:
+
+```
+ffrwd run -y "COPY (SELECT f.video[1] FROM input('src444.mkv') f)
+  TO 'enc444.nut' WITH (video_codec ffrwd.pyrowave.encode(bytes_per_frame => 120000), pix_fmt 'yuv444p')"
+ffrwd run -y "COPY (SELECT f.video[1] FROM input('enc444.nut') f)
+  TO 'back444.y4m' WITH (video_codec 'rawvideo', pix_fmt 'yuv444p')"
+```
+
+Colour tags travel with the container. A bt709 source encoded to `.mkv`
+keeps `bt709` primaries, transfer and matrix and the tv range, and so does
+what is decoded from it into another `.mkv`. NUT has no field for them, so a
+stream that passes through `.nut` loses them, and a copy out of it into
+`.mkv` or `.mov` has none to keep.
+
+The round trip is a function on a video stream, through ffrwd:
+
+```
+ffrwd run -y "COPY (SELECT ffrwd.pyrowave.roundtrip(f.video[1], bytes_per_frame => 60000) FROM input('src.mp4') f)
+  TO 'rt.y4m' WITH (video_codec 'rawvideo')"
+```
+
+or on the sidecar as it is:
 
 ```
 ffrwd-wasm -gpu modules/pyrowave_roundtrip.wasm -f nut -i pipe:0   -m modules/pyrowave_roundtrip.wasm -params '{"bytes_per_frame":60000}'   -f nut pipe:1 -f ndjson rows.ndjson < in.nut > out.nut
@@ -204,6 +243,32 @@ extradata and the refusals; `pyrowave-codec-test roundtrip in.y4m out.y4m`
 encodes a y4m through `encode`, hands the packets and the extradata to
 `decode`, and writes what comes back (`--rate NUM/DEN` passes `init` a frame
 rate). See `codec/test/CMakeLists.txt` for the build.
+
+`cmake -P codec/test/check.cmake` builds the test and runs its `checks`. It
+is the manifest's `test`, which `ffrwd publish` runs in the package's
+directory before it packs, and a CMake script so the one command works from
+cmd.exe and from a POSIX shell. It needs clang and clang++ on PATH
+(llvm-mingw on Windows), Ninja or make, the PyroWave fork at `../pyrowave`
+or `PYROWAVE_DIR` with wgpu-native in its `webgpu/external/` (or
+`PYROWAVE_WEBGPU_NATIVE_DIR`), and a GPU. It builds under the temp directory
+(`PYROWAVE_TEST_BUILD` moves it). From a clean build directory it takes about
+10 s here and ends `passed: 0 failed`.
+
+## Publishing
+
+The archive `ffrwd publish` packs holds the manifest, the lib SQL
+(`src/codec.sql`, `src/pyrowave.sql`), the two modules the SQL declares
+(`modules/pyrowave.wasm`, `modules/pyrowave_roundtrip.wasm`, shipped
+although `.gitignore` names `modules/`), this README and `LICENSE`: seven
+files, about 665 kB gzipped. `.ffrwdignore` names the sources and the build,
+which stay here. Build the modules before publishing: the archive takes
+what is in `modules/`.
+
+## License
+
+MIT, in `LICENSE`, which also carries the notices for what the modules are
+compiled from: PyroWave (MIT) and `webgpu.h` (BSD-3-Clause). The WIT under
+`webgpu-wasi/wit/` is Apache-2.0 WITH LLVM-exception (`webgpu-wasi/wit/LICENSE`).
 
 ## Measured
 
@@ -239,33 +304,47 @@ instance; a decoder in the same instance reuses the device.
 
 ### Through ffrwd
 
-RTX 4090, Windows, the CLI's `codec-worlds` build (ffrwd 0.22.0 and its
-sidecar), the package linked, over all of `es.mp4`: 300 frames of 1280x720
-yuv420p at 30 fps with AAC copied beside them. The coded NUT's video stream
-has the tag `PYRW`, 16 bytes of extradata
-(`50595257 01 10 00 00 00050000 d0020000`), 300 packets, all keyframes, in
-the time base NUT picks (1/61440 with the audio, a frame every 2048 ticks).
-Decoded again by ffrwd, the frames are bit for bit the native test's at the
-same params (framemd5), and so are those decoded from the stream copied into
-`.mkv` and `.mov`.
+RTX 4090, Windows, the released ffrwd 0.24.0 from PyPI and its own sidecar
+(`FFRWD_WASM` unset), this version's archive linked into a scratch project,
+over all of `es.mp4`: 300 frames of 1280x720 yuv420p at 30 fps, bt709, with
+AAC copied beside them. The coded NUT's video stream has the tag `PYRW`, 16
+bytes of extradata (`50595257 01 10 00 00 00050000 d0020000`), 300 packets,
+all keyframes, in the time base NUT picks (1/61440 with the audio, a frame
+every 2048 ticks). Decoded again by ffrwd, the frames are bit for bit the
+native test's at the same params (framemd5), and so are those decoded with
+`decoder => ffrwd.pyrowave.decode()` named, into `.mkv` as ffv1, from the
+stream copied into `.mkv` and `.mov`, and what `roundtrip` makes at 60000.
 
 | params | mean bytes per frame | Y / U / V (dB), 300 frames | first 150 frames |
 |---|---|---|---|
 | `bytes_per_frame` 60000 | 59956.6 | 33.827 / 41.993 / 39.192 | 32.798 / 41.097 / 38.020 |
-| `bitrate` 14400000 (at 30/1) | 59956.6 | the same packets | the same |
+| `bitrate` 14400000 (at 30/1) | 59956.6 | the same file, byte for byte | the same |
 | `bitrate` 200000000 (at 30/1) | 548183.4 | 68.048 / 68.396 / 68.202 | |
 
-The first 150 frames give the numbers of the table above. Wall time of a
-whole `ffrwd run`, median of three, including about 0.8 s that ffrwd spends
-before ffmpeg starts (Python, probing the input, describing the module):
+The first 150 frames give the numbers of the codec's table above.
+
+A 4:4:4 source, 60 frames of 1280x720 yuv444p in FFV1, encoded with
+`pix_fmt 'yuv444p'` at `bytes_per_frame` 120000: extradata
+`50595257 01 10 01 00 00050000 d0020000` (chroma 1, 4:4:4), 60 keyframes of
+119953.3 bytes on average, decoded back as yuv444p bit for bit what the
+native test makes from the same frames, 37.660 / 49.534 / 48.133 dB against
+the source. Without `pix_fmt` the coded file is the same.
+
+The bt709 source encoded to `.mkv` probes `color_range=tv`,
+`color_space=bt709`, `color_transfer=bt709`, `color_primaries=bt709`, and so
+does its decode into another `.mkv`.
+
+Wall time of a whole `ffrwd run`, median of three, including what ffrwd
+spends before ffmpeg starts (Python, probing the input, describing the
+module):
 
 | run | wall | frames per second |
 |---|---|---|
-| encode, 60000 bytes a frame, audio copied | 1.57 s | 191 |
-| encode, 200 Mb/s, audio copied | 1.70 s | 177 |
-| decode to y4m, 60000 bytes a frame | 1.61 s | 187 |
-| decode to y4m, 200 Mb/s | 1.75 s | 172 |
-| no codec, the source to y4m (for scale) | 0.94 s | 320 |
+| encode, 60000 bytes a frame, audio copied | 1.35 s | 222 |
+| encode, 200 Mb/s, audio copied | 1.46 s | 205 |
+| decode to y4m, 60000 bytes a frame | 1.44 s | 209 |
+| decode to y4m, 200 Mb/s | 1.58 s | 190 |
+| no codec, the source to y4m (for scale) | 0.85 s | 353 |
 
 ### The round trip
 

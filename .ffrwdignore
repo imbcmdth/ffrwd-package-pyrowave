@@ -1,0 +1,8 @@
+# The archive is the built modules, the lib SQL, the README and the licence.
+# The sources and the build stay in the repository.
+/build.sh
+/CMakeLists.txt
+/codec/
+/module/
+/webgpu-wasi/
+/build/
