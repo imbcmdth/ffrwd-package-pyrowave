@@ -1,0 +1,8 @@
+// The imports the webgpu.h shim is written against: wasi:webgpu@0.0.1 (the
+// synchronous WASI 0.2 version) and nothing else. wasi:graphics-context and
+// wasi:io/poll come along because webgpu's types name them.
+package ffrwd:webgpu-wasi;
+
+world webgpu-wasi {
+  import wasi:webgpu/webgpu@0.0.1;
+}

@@ -1,0 +1,22 @@
+{
+  "name": "ffrwd/pyrowave",
+  "version": "0.1.0",
+  "description": "PyroWave, the GPU wavelet codec, as ffrwd sidecar modules: C++ compiled to a wasip2 component that reaches the GPU through wasi:webgpu. For now one module, a round trip that encodes and decodes every frame at a chosen size to show what a rate costs.",
+  "license": "Apache-2.0",
+  "private": true,
+  "capabilities": [
+    "gpu"
+  ],
+  "keywords": [
+    "pyrowave",
+    "codec",
+    "wavelet",
+    "gpu",
+    "webgpu",
+    "intra"
+  ],
+  "lib": {
+    "roundtrip": "src/pyrowave.sql",
+    "roundtrip_stats": "src/pyrowave.sql"
+  }
+}
