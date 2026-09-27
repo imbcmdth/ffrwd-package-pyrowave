@@ -23,7 +23,8 @@ The package has two modules:
   extradata header, the params, the size per frame and the GPU encoder and
   decoder; `codec/src/codec.cpp` is the glue to the `encoder` and `decoder`
   exports. `codec/wit/deps/ffrwd-av/av.wit` is the CLI's `sidecar/wit/av.wit`
-  at 0.18.0, and `codec/generated/` is wit-bindgen's C output for it.
+  at 0.18.0 (the encoder's `init` taking `frame-rate`, as of the CLI's
+  423bae5), and `codec/generated/` is wit-bindgen's C output for it.
   `codec/test/` is a native test of the same code (see Testing).
 * `module/`: the round-trip filter, C++ on ffrwd:av 0.17.0's `video-module`
   world (`module/wit/deps/ffrwd-av/av.wit` is the sidecar's `wit/av.wit` at
@@ -73,12 +74,17 @@ instance that runs both an encoder and a decoder shares the one device.
 
 JSON, as the lib's `encode` passes them:
 
-* `bitrate`: bits per second (default 200000000). A frame's size is the
+* `bitrate`: bits per second (default 200000000). The encoder's `init` takes
+  the stream's nominal frame rate as `frame-rate: option<rational>` beside
+  the params; ffrwd hands it the rate its input was probed at (the sidecar's
+  `-frame_rate`). With a rate, every frame's size is bitrate / frame rate / 8
+  bytes: 14400000 at 30000/1001 is 60060. With none, a frame's size is the
   bitrate over the frame's duration: the frame's own `duration`, else the gap
   to the next frame's `pts` in the same call, else the last duration seen,
   else one tick of the time base when the time base reads as a frame rate (1
   to 240 per second). A frame with none of these is refused with a message
-  asking for `bytes_per_frame`.
+  asking for `bytes_per_frame`. A rate with a zero or negative part counts as
+  none.
 * `bytes_per_frame`: a fixed size for every frame, from 1024 bytes. Wins over
   `bitrate` when set.
 
@@ -119,18 +125,58 @@ added.
 Both modules import `wasi:webgpu`, so the sidecar refuses to run either
 without the grant (`-gpu <module>`).
 
-The codec is written in a query where a codec name goes, and a stream it
-wrote is read back by naming the decoder:
+This needs an ffrwd whose sidecar hosts ffrwd:av 0.18.0's `encoder` and
+`decoder` with the `frame-rate` argument: the CLI's `codec-worlds` branch
+from 423bae5 on, not yet released. A module built on the earlier `init`,
+without `frame-rate`, does not instantiate there. ffrwd grants `-gpu` itself,
+from the module's own imports.
+
+Linking the package into a project, from the package's directory and then
+the project's:
 
 ```
-COPY (SELECT f.video[1] FROM input('in.nut') f) TO 'out.nut'
-  WITH (video_codec => ffrwd.pyrowave.encode(bytes_per_frame => 60000));
-COPY (SELECT f.video[1] FROM input('out.nut', decoder => ffrwd.pyrowave.decode()) f)
-  TO 'back.y4m';
+ffrwd link
+ffrwd link ffrwd/pyrowave
 ```
 
-That needs an ffrwd whose sidecar hosts ffrwd:av 0.18.0's `encoder` and
-`decoder`, which has not shipped yet.
+The encoder is written in a query where a codec name goes. Audio can be
+copied beside it:
+
+```
+ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('src.mp4') f)
+  TO 'enc.nut' WITH (video_codec ffrwd.pyrowave.encode(bitrate => 200000000), audio_codec 'copy')"
+ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('src.mp4') f)
+  TO 'enc.nut' WITH (video_codec ffrwd.pyrowave.encode(bytes_per_frame => 60000), audio_codec 'copy')"
+```
+
+ffrwd passes the input's frame rate to `init` (`-frame_rate 30/1` for a 30
+fps input), so `bitrate => 14400000` on a 30 fps input writes the same
+packets as `bytes_per_frame => 60000`.
+
+The decoder is used unasked wherever a `PYRW` stream is read as frames, or
+named outright with `decoder =>`:
+
+```
+ffrwd run -y "COPY (SELECT f.video[1] FROM input('enc.nut') f)
+  TO 'back.y4m' WITH (video_codec 'rawvideo')"
+ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('enc.nut') f)
+  TO 'back.mkv' WITH (video_codec 'ffv1')"
+ffrwd run -y "COPY (SELECT f.video[1] FROM input('enc.nut', decoder => ffrwd.pyrowave.decode()) f)
+  TO 'back.y4m' WITH (video_codec 'rawvideo')"
+```
+
+An output that names no video codec copies the coded stream, which `.nut`,
+`.mkv` and `.mov` keep by its tag, with the 16-byte extradata:
+
+```
+ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('enc.nut') f) TO 'copy.mkv'"
+ffrwd run -y "COPY (SELECT f.video[1], f.audio[1] FROM input('enc.nut') f) TO 'copy.mov'"
+```
+
+A `.y4m` or `.mp4` output with no codec named is refused, since neither
+holds `PYRW`. The raw frames between ffmpeg and the sidecar are yuv420p, so
+ffrwd hands the encoder yuv420p even from a 4:4:4 source; 4:4:4 is coded only
+by a host that passes yuv444p frames, like the native test.
 
 The round trip runs on the sidecar as it is:
 
@@ -143,9 +189,8 @@ least 1024). Input is yuv420p. Rows, one per frame: `time`, `bytes`,
 `encode_ms`, `decode_ms` (upload, GPU work and readback, wall clock, inside the
 module).
 
-The manifest declares the `gpu` capability, which ffrwd 0.22.0 does not know
-yet: until the CLI grants it, the package does not link, and a query calling
-the module is refused by the sidecar with
+The manifest declares the `gpu` capability. A sidecar run without the grant
+refuses the module with
 `imports wasi:webgpu, and this run grants it no GPU; grant it with -gpu <module>`.
 
 ## Testing
@@ -154,10 +199,11 @@ the module is refused by the sidecar with
 `pyrowave_codec.cpp` and the generated bindings) natively against
 wgpu-native and calls the exports the way a host does, owning and freeing
 what crosses. `pyrowave-codec-test checks` covers the describes, the params,
-the extradata and the refusals; `pyrowave-codec-test roundtrip in.y4m out.y4m`
+the size per frame (with a frame rate, with none, and at 30000/1001), the
+extradata and the refusals; `pyrowave-codec-test roundtrip in.y4m out.y4m`
 encodes a y4m through `encode`, hands the packets and the extradata to
-`decode`, and writes what comes back. See `codec/test/CMakeLists.txt` for the
-build.
+`decode`, and writes what comes back (`--rate NUM/DEN` passes `init` a frame
+rate). See `codec/test/CMakeLists.txt` for the build.
 
 ## Measured
 
@@ -165,7 +211,7 @@ build.
 
 RTX 4090, Windows. `pyrowave.wasm` itself, run on wasmtime 48 with the
 sidecar's vendored wasi:webgpu host (wgpu 29, Vulkan) by a stand-in for the
-host that is not written yet, and the native test on wgpu-native v29
+sidecar's codec host, written before it, and the native test on wgpu-native v29
 (Vulkan), both over the same 150 frames of `es.mp4`. Every decoded frame is
 bit for bit what the fork's own `pyrowave-webgpu-encode` and `-decode` make
 at the same size (framemd5), in 4:2:0 at 720p and 1080p and in 4:4:4 at
@@ -180,9 +226,9 @@ at the same size (framemd5), in 4:2:0 at 720p and 1080p and in 4:4:4 at
 | 720p 4:4:4 | `bytes_per_frame` 120000 | 119965.1 | 44.003 / 44.393 / 44.170 |
 
 `bitrate` 14400000 at 30 frames a second is 60000 bytes a frame, and gives the
-same packets whether the size comes from the frames' durations, from the gaps
-between their `pts` or from a 1/30 time base, at 1/30 or 1/90000, one frame
-per call or several.
+same packets whether the size comes from the frame rate `init` is given, from
+the frames' durations, from the gaps between their `pts` or from a 1/30 time
+base, at 1/30 or 1/90000, one frame per call or several.
 
 Per frame at 720p, 60000 bytes, one frame per call, measured by the stand-in
 host around each call (so including the copies across the component
@@ -190,6 +236,36 @@ boundary): encode 0.73 ms and decode 0.88 ms; at 1080p and 120000 bytes,
 1.45 and 1.81 ms. The native test takes 0.42 / 0.37 ms and 0.78 / 0.84 ms.
 Opening the device and compiling the encode pipelines takes about 60 ms per
 instance; a decoder in the same instance reuses the device.
+
+### Through ffrwd
+
+RTX 4090, Windows, the CLI's `codec-worlds` build (ffrwd 0.22.0 and its
+sidecar), the package linked, over all of `es.mp4`: 300 frames of 1280x720
+yuv420p at 30 fps with AAC copied beside them. The coded NUT's video stream
+has the tag `PYRW`, 16 bytes of extradata
+(`50595257 01 10 00 00 00050000 d0020000`), 300 packets, all keyframes, in
+the time base NUT picks (1/61440 with the audio, a frame every 2048 ticks).
+Decoded again by ffrwd, the frames are bit for bit the native test's at the
+same params (framemd5), and so are those decoded from the stream copied into
+`.mkv` and `.mov`.
+
+| params | mean bytes per frame | Y / U / V (dB), 300 frames | first 150 frames |
+|---|---|---|---|
+| `bytes_per_frame` 60000 | 59956.6 | 33.827 / 41.993 / 39.192 | 32.798 / 41.097 / 38.020 |
+| `bitrate` 14400000 (at 30/1) | 59956.6 | the same packets | the same |
+| `bitrate` 200000000 (at 30/1) | 548183.4 | 68.048 / 68.396 / 68.202 | |
+
+The first 150 frames give the numbers of the table above. Wall time of a
+whole `ffrwd run`, median of three, including about 0.8 s that ffrwd spends
+before ffmpeg starts (Python, probing the input, describing the module):
+
+| run | wall | frames per second |
+|---|---|---|
+| encode, 60000 bytes a frame, audio copied | 1.57 s | 191 |
+| encode, 200 Mb/s, audio copied | 1.70 s | 177 |
+| decode to y4m, 60000 bytes a frame | 1.61 s | 187 |
+| decode to y4m, 200 Mb/s | 1.75 s | 172 |
+| no codec, the source to y4m (for scale) | 0.94 s | 320 |
 
 ### The round trip
 
