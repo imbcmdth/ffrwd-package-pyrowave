@@ -29,5 +29,7 @@ cmake -S "$here" -B "$build" -G "$generator" \
 cmake --build "$build" --parallel
 
 mkdir -p "$here/modules"
-cp "$build/module/pyrowave_roundtrip.wasm" "$here/modules/pyrowave_roundtrip.wasm"
-echo "built $here/modules/pyrowave_roundtrip.wasm"
+for module in module/pyrowave_roundtrip.wasm codec/pyrowave.wasm; do
+	cp "$build/$module" "$here/modules/$(basename "$module")"
+	echo "built $here/modules/$(basename "$module")"
+done

@@ -1,0 +1,9 @@
+// The codec module: PyroWave's encoder and decoder on ffrwd:av 0.18.0's
+// codec-module world. Its GPU comes from wasi:webgpu, which the webgpu.h shim
+// under ../webgpu-wasi imports; the two worlds are merged when the component
+// is linked.
+package ffrwd:pyrowave;
+
+world codec {
+  include ffrwd:av/codec-module@0.18.0;
+}

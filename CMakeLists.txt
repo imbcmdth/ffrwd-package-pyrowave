@@ -7,7 +7,9 @@
 #     -DWASI_SDK_PREFIX=$WASI_SDK -DPYROWAVE_DIR=../pyrowave
 #   cmake --build build
 #
-# build.sh does the same. The module lands in build/pyrowave_roundtrip.wasm.
+# build.sh does the same. The modules land in build/module/pyrowave_roundtrip.wasm
+# (the round-trip filter) and build/codec/pyrowave.wasm (the encoder and
+# decoder).
 
 cmake_minimum_required(VERSION 3.20)
 project(ffrwd-pyrowave LANGUAGES C CXX)
@@ -39,3 +41,4 @@ set(PYROWAVE_WEBGPU_TOOLS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${PYROWAVE_DIR}/webgpu" pyrowave-webgpu)
 
 add_subdirectory(module)
+add_subdirectory(codec)
