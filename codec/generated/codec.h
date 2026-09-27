@@ -346,6 +346,8 @@ typedef ffrwd_av_types_packet_t exports_ffrwd_av_encoder_packet_t;
 
 typedef ffrwd_av_types_raw_frame_t exports_ffrwd_av_encoder_raw_frame_t;
 
+typedef ffrwd_av_types_rational_t exports_ffrwd_av_encoder_rational_t;
+
 typedef ffrwd_av_types_stream_info_t exports_ffrwd_av_encoder_stream_info_t;
 
 typedef struct exports_ffrwd_av_encoder_encoder_meta_t {
@@ -370,6 +372,11 @@ typedef struct exports_ffrwd_av_encoder_encoder_meta_t {
   // length. Always 0 for video.
   uint32_t   frame_samples;
 } exports_ffrwd_av_encoder_encoder_meta_t;
+
+typedef struct {
+  bool is_some;
+  exports_ffrwd_av_encoder_rational_t val;
+} exports_ffrwd_av_encoder_option_rational_t;
 
 typedef struct {
   bool is_err;
@@ -447,7 +454,7 @@ typedef struct {
 
 // Exported Functions from `ffrwd:av/encoder@0.18.0`
 void exports_ffrwd_av_encoder_describe(exports_ffrwd_av_encoder_encoder_meta_t *ret);
-bool exports_ffrwd_av_encoder_init(exports_ffrwd_av_encoder_format_t *format, exports_ffrwd_av_encoder_stream_info_t *info, codec_string_t *params, exports_ffrwd_av_encoder_coded_stream_t *ret, codec_string_t *err);
+bool exports_ffrwd_av_encoder_init(exports_ffrwd_av_encoder_format_t *format, exports_ffrwd_av_encoder_stream_info_t *info, exports_ffrwd_av_encoder_rational_t *maybe_frame_rate, codec_string_t *params, exports_ffrwd_av_encoder_coded_stream_t *ret, codec_string_t *err);
 bool exports_ffrwd_av_encoder_encode(exports_ffrwd_av_encoder_list_raw_frame_t *frames, bool last, exports_ffrwd_av_encoder_list_packet_t *ret, codec_string_t *err);
 
 // Exported Functions from `ffrwd:av/decoder@0.18.0`
@@ -526,6 +533,8 @@ void exports_ffrwd_av_encoder_raw_frame_free(exports_ffrwd_av_encoder_raw_frame_
 void exports_ffrwd_av_encoder_stream_info_free(exports_ffrwd_av_encoder_stream_info_t *ptr);
 
 void exports_ffrwd_av_encoder_encoder_meta_free(exports_ffrwd_av_encoder_encoder_meta_t *ptr);
+
+void exports_ffrwd_av_encoder_option_rational_free(exports_ffrwd_av_encoder_option_rational_t *ptr);
 
 void exports_ffrwd_av_encoder_result_coded_stream_string_free(exports_ffrwd_av_encoder_result_coded_stream_string_t *ptr);
 

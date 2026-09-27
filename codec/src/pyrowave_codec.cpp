@@ -303,13 +303,26 @@ bool parse_decoder_params(const std::string &text, std::string *error)
 	return parse_object(text, take, error);
 }
 
-void Budget::init(const EncoderParams &params_, int32_t tb_num_, int32_t tb_den_, size_t max_bytes_)
+void Budget::init(const EncoderParams &params_, int32_t tb_num_, int32_t tb_den_, int32_t rate_num_,
+                  int32_t rate_den_, size_t max_bytes_)
 {
 	params = params_;
 	tb_num = tb_num_;
 	tb_den = tb_den_;
+	bool rate_known = rate_num_ > 0 && rate_den_ > 0;
+	rate_num = rate_known ? rate_num_ : 0;
+	rate_den = rate_known ? rate_den_ : 0;
 	max_bytes = max_bytes_;
 	last_duration = -1;
+}
+
+size_t Budget::clamp(double size) const
+{
+	if (size < double(MIN_BYTES_PER_FRAME))
+		size = double(MIN_BYTES_PER_FRAME);
+	if (size > double(max_bytes))
+		size = double(max_bytes);
+	return size_t(size);
 }
 
 bool Budget::next(int64_t duration, int64_t gap, size_t *bytes, std::string *error)
@@ -317,6 +330,12 @@ bool Budget::next(int64_t duration, int64_t gap, size_t *bytes, std::string *err
 	if (params.bytes_per_frame)
 	{
 		*bytes = params.bytes_per_frame < max_bytes ? params.bytes_per_frame : max_bytes;
+		return true;
+	}
+
+	if (rate_num)
+	{
+		*bytes = clamp(floor(params.bitrate * double(rate_den) / double(rate_num) / 8.0));
 		return true;
 	}
 
@@ -341,12 +360,7 @@ bool Budget::next(int64_t duration, int64_t gap, size_t *bytes, std::string *err
 	last_duration = duration;
 
 	double seconds = double(duration) * double(tb_num) / double(tb_den);
-	double size = floor(params.bitrate * seconds / 8.0);
-	if (size < double(MIN_BYTES_PER_FRAME))
-		size = double(MIN_BYTES_PER_FRAME);
-	if (size > double(max_bytes))
-		size = double(max_bytes);
-	*bytes = size_t(size);
+	*bytes = clamp(floor(params.bitrate * seconds / 8.0));
 	return true;
 }
 

@@ -3,7 +3,9 @@
 // pyrowave_codec.cpp; this file moves values across the component boundary.
 //
 // Encoder params: {"bitrate": bits per second, "bytes_per_frame": N}, either
-// left out or null for its default; bytes_per_frame wins when set. Every
+// left out or null for its default; bytes_per_frame wins when set, and
+// otherwise a frame's size is the bitrate over init's frame rate, or over the
+// frame's duration when init had no rate. Every
 // packet is one whole frame and a keyframe, with dts = pts. The extradata is
 // the 16-byte header pyrowave_codec.hpp describes. The decoder takes no
 // params.
@@ -26,7 +28,7 @@ const char *const VERSION = "0.2.0";
 const char *const ENCODER_PARAMS_SCHEMA =
 		"{\"type\":\"object\",\"properties\":{"
 		"\"bitrate\":{\"type\":\"number\",\"minimum\":1,"
-		"\"description\":\"Bits per second; with each frame's duration it sets the size of the frame\"},"
+		"\"description\":\"Bits per second; over the stream's frame rate, or else each frame's duration, it sets the size of a frame\"},"
 		"\"bytes_per_frame\":{\"type\":\"integer\",\"minimum\":1024,"
 		"\"description\":\"Encoded size of every frame, in bytes; wins over bitrate\"}},"
 		"\"additionalProperties\":false}";
@@ -98,7 +100,8 @@ void exports_ffrwd_av_encoder_describe(exports_ffrwd_av_encoder_encoder_meta_t *
 }
 
 bool exports_ffrwd_av_encoder_init(exports_ffrwd_av_encoder_format_t *format,
-                                   exports_ffrwd_av_encoder_stream_info_t *info, codec_string_t *params,
+                                   exports_ffrwd_av_encoder_stream_info_t *info,
+                                   exports_ffrwd_av_encoder_rational_t *maybe_frame_rate, codec_string_t *params,
                                    exports_ffrwd_av_encoder_coded_stream_t *ret, codec_string_t *err)
 {
 	std::string text = as_string(*params);
@@ -137,7 +140,11 @@ bool exports_ffrwd_av_encoder_init(exports_ffrwd_av_encoder_format_t *format,
 	size_t max_bytes = 2 * frame_size(shape);
 	if (max_bytes < 64 * 1024)
 		max_bytes = 64 * 1024;
-	encoder_state.budget.init(parsed, time_base.num, time_base.den, max_bytes);
+	// The nominal frame rate, when the host knows it, sets the size of every
+	// frame; with none the budget falls back on the frames' durations.
+	int32_t rate_num = maybe_frame_rate ? maybe_frame_rate->num : 0;
+	int32_t rate_den = maybe_frame_rate ? maybe_frame_rate->den : 0;
+	encoder_state.budget.init(parsed, time_base.num, time_base.den, rate_num, rate_den, max_bytes);
 
 	memset(ret, 0, sizeof(*ret));
 	set_string(&ret->codec, CODEC);

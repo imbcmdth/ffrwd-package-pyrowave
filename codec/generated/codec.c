@@ -608,6 +608,11 @@ void exports_ffrwd_av_encoder_encoder_meta_free(exports_ffrwd_av_encoder_encoder
   codec_string_free(&ptr->fourcc);
 }
 
+void exports_ffrwd_av_encoder_option_rational_free(exports_ffrwd_av_encoder_option_rational_t *ptr) {
+  if (ptr->is_some) {
+  }
+}
+
 void exports_ffrwd_av_encoder_result_coded_stream_string_free(exports_ffrwd_av_encoder_result_coded_stream_string_t *ptr) {
   if (!ptr->is_err) {
     exports_ffrwd_av_encoder_coded_stream_free(&ptr->val.ok);
@@ -838,8 +843,23 @@ uint8_t * __wasm_export_exports_ffrwd_av_encoder_init(uint8_t * arg) {
       break;
     }
   }
-  exports_ffrwd_av_encoder_format_t arg2 = variant;
-  exports_ffrwd_av_encoder_stream_info_t arg3 = (ffrwd_av_types_stream_info_t) {
+  exports_ffrwd_av_encoder_option_rational_t option2;
+  switch ((int32_t) *((uint8_t*) (arg + (40+18*sizeof(void*))))) {
+    case 0: {
+      option2.is_some = false;
+      break;
+    }
+    case 1: {
+      option2.is_some = true;
+      option2.val = (ffrwd_av_types_rational_t) {
+        (int32_t) *((int32_t*) (arg + (44+18*sizeof(void*)))),
+        (int32_t) *((int32_t*) (arg + (48+18*sizeof(void*)))),
+      };
+      break;
+    }
+  }
+  exports_ffrwd_av_encoder_format_t arg3 = variant;
+  exports_ffrwd_av_encoder_stream_info_t arg4 = (ffrwd_av_types_stream_info_t) {
     (uint32_t) (uint32_t) (*((int32_t*) (arg + (8+12*sizeof(void*))))),
     (codec_string_t) (codec_string_t) { (uint8_t*)(*((uint8_t **) (arg + (8+13*sizeof(void*))))), (*((size_t*) (arg + (8+14*sizeof(void*))))) },
     (codec_string_t) (codec_string_t) { (uint8_t*)(*((uint8_t **) (arg + (8+15*sizeof(void*))))), (*((size_t*) (arg + (8+16*sizeof(void*))))) },
@@ -850,11 +870,11 @@ uint8_t * __wasm_export_exports_ffrwd_av_encoder_init(uint8_t * arg) {
       (int32_t) *((int32_t*) (arg + (36+18*sizeof(void*)))),
     },
   };
-  codec_string_t arg4 = (codec_string_t) { (uint8_t*)(*((uint8_t **) (arg + (40+18*sizeof(void*))))), (*((size_t*) (arg + (40+19*sizeof(void*))))) };
+  codec_string_t arg5 = (codec_string_t) { (uint8_t*)(*((uint8_t **) (arg + (48+19*sizeof(void*))))), (*((size_t*) (arg + (48+20*sizeof(void*))))) };
   exports_ffrwd_av_encoder_result_coded_stream_string_t ret;
   exports_ffrwd_av_encoder_coded_stream_t ok;
   codec_string_t err;
-  ret.is_err = !exports_ffrwd_av_encoder_init(&arg2, &arg3, &arg4, &ok, &err);
+  ret.is_err = !exports_ffrwd_av_encoder_init(&arg3, &arg4, option2.is_some ? &(option2.val) : NULL, &arg5, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -864,9 +884,9 @@ uint8_t * __wasm_export_exports_ffrwd_av_encoder_init(uint8_t * arg) {
   free(arg);
   uint8_t *ptr = (uint8_t *) &RET_AREA;
   if ((ret).is_err) {
-    const codec_string_t *payload18 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
-    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload18).len;
-    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload18).ptr;
+    const codec_string_t *payload19 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload19).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload19).ptr;
   } else {
     const exports_ffrwd_av_encoder_coded_stream_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
     *((size_t*)(ptr + (2*sizeof(void*)))) = ((*payload).codec).len;
@@ -875,44 +895,44 @@ uint8_t * __wasm_export_exports_ffrwd_av_encoder_init(uint8_t * arg) {
     *((int32_t*)(ptr + (4+3*sizeof(void*)))) = ((*payload).time_base).den;
     switch ((int32_t) ((*payload).format).tag) {
       case 0: {
-        const ffrwd_av_types_coded_video_t *payload5 = &((*payload).format).val.video;
+        const ffrwd_av_types_coded_video_t *payload6 = &((*payload).format).val.video;
         *((int8_t*)(ptr + (8+3*sizeof(void*)))) = 0;
-        *((int32_t*)(ptr + (8+4*sizeof(void*)))) = (int32_t) ((*payload5).width);
-        *((int32_t*)(ptr + (12+4*sizeof(void*)))) = (int32_t) ((*payload5).height);
-        if (((*payload5).sample_aspect_ratio).is_some) {
-          const ffrwd_av_types_rational_t *payload7 = &((*payload5).sample_aspect_ratio).val;
+        *((int32_t*)(ptr + (8+4*sizeof(void*)))) = (int32_t) ((*payload6).width);
+        *((int32_t*)(ptr + (12+4*sizeof(void*)))) = (int32_t) ((*payload6).height);
+        if (((*payload6).sample_aspect_ratio).is_some) {
+          const ffrwd_av_types_rational_t *payload8 = &((*payload6).sample_aspect_ratio).val;
           *((int8_t*)(ptr + (16+4*sizeof(void*)))) = 1;
-          *((int32_t*)(ptr + (20+4*sizeof(void*)))) = (*payload7).num;
-          *((int32_t*)(ptr + (24+4*sizeof(void*)))) = (*payload7).den;
+          *((int32_t*)(ptr + (20+4*sizeof(void*)))) = (*payload8).num;
+          *((int32_t*)(ptr + (24+4*sizeof(void*)))) = (*payload8).den;
         } else {
           *((int8_t*)(ptr + (16+4*sizeof(void*)))) = 0;
         }
-        if (((*payload5).color).is_some) {
-          const ffrwd_av_types_color_info_t *payload9 = &((*payload5).color).val;
+        if (((*payload6).color).is_some) {
+          const ffrwd_av_types_color_info_t *payload10 = &((*payload6).color).val;
           *((int8_t*)(ptr + (24+5*sizeof(void*)))) = 1;
-          *((size_t*)(ptr + (24+7*sizeof(void*)))) = ((*payload9).range).len;
-          *((uint8_t **)(ptr + (24+6*sizeof(void*)))) = (uint8_t *) ((*payload9).range).ptr;
-          *((size_t*)(ptr + (24+9*sizeof(void*)))) = ((*payload9).primaries).len;
-          *((uint8_t **)(ptr + (24+8*sizeof(void*)))) = (uint8_t *) ((*payload9).primaries).ptr;
-          *((size_t*)(ptr + (24+11*sizeof(void*)))) = ((*payload9).trc).len;
-          *((uint8_t **)(ptr + (24+10*sizeof(void*)))) = (uint8_t *) ((*payload9).trc).ptr;
-          *((size_t*)(ptr + (24+13*sizeof(void*)))) = ((*payload9).space).len;
-          *((uint8_t **)(ptr + (24+12*sizeof(void*)))) = (uint8_t *) ((*payload9).space).ptr;
+          *((size_t*)(ptr + (24+7*sizeof(void*)))) = ((*payload10).range).len;
+          *((uint8_t **)(ptr + (24+6*sizeof(void*)))) = (uint8_t *) ((*payload10).range).ptr;
+          *((size_t*)(ptr + (24+9*sizeof(void*)))) = ((*payload10).primaries).len;
+          *((uint8_t **)(ptr + (24+8*sizeof(void*)))) = (uint8_t *) ((*payload10).primaries).ptr;
+          *((size_t*)(ptr + (24+11*sizeof(void*)))) = ((*payload10).trc).len;
+          *((uint8_t **)(ptr + (24+10*sizeof(void*)))) = (uint8_t *) ((*payload10).trc).ptr;
+          *((size_t*)(ptr + (24+13*sizeof(void*)))) = ((*payload10).space).len;
+          *((uint8_t **)(ptr + (24+12*sizeof(void*)))) = (uint8_t *) ((*payload10).space).ptr;
         } else {
           *((int8_t*)(ptr + (24+5*sizeof(void*)))) = 0;
         }
         break;
       }
       case 1: {
-        const ffrwd_av_types_coded_audio_t *payload10 = &((*payload).format).val.audio;
+        const ffrwd_av_types_coded_audio_t *payload11 = &((*payload).format).val.audio;
         *((int8_t*)(ptr + (8+3*sizeof(void*)))) = 1;
-        *((int32_t*)(ptr + (8+4*sizeof(void*)))) = (int32_t) ((*payload10).sample_rate);
-        *((int32_t*)(ptr + (12+4*sizeof(void*)))) = (int32_t) ((*payload10).channels);
-        if (((*payload10).channel_layout).is_some) {
-          const codec_string_t *payload12 = &((*payload10).channel_layout).val;
+        *((int32_t*)(ptr + (8+4*sizeof(void*)))) = (int32_t) ((*payload11).sample_rate);
+        *((int32_t*)(ptr + (12+4*sizeof(void*)))) = (int32_t) ((*payload11).channels);
+        if (((*payload11).channel_layout).is_some) {
+          const codec_string_t *payload13 = &((*payload11).channel_layout).val;
           *((int8_t*)(ptr + (16+4*sizeof(void*)))) = 1;
-          *((size_t*)(ptr + (16+6*sizeof(void*)))) = (*payload12).len;
-          *((uint8_t **)(ptr + (16+5*sizeof(void*)))) = (uint8_t *) (*payload12).ptr;
+          *((size_t*)(ptr + (16+6*sizeof(void*)))) = (*payload13).len;
+          *((uint8_t **)(ptr + (16+5*sizeof(void*)))) = (uint8_t *) (*payload13).ptr;
         } else {
           *((int8_t*)(ptr + (16+4*sizeof(void*)))) = 0;
         }
@@ -926,16 +946,16 @@ uint8_t * __wasm_export_exports_ffrwd_av_encoder_init(uint8_t * arg) {
     *((size_t*)(ptr + (24+15*sizeof(void*)))) = ((*payload).extradata).len;
     *((uint8_t **)(ptr + (24+14*sizeof(void*)))) = (uint8_t *) ((*payload).extradata).ptr;
     if (((*payload).profile).is_some) {
-      const int32_t *payload15 = &((*payload).profile).val;
+      const int32_t *payload16 = &((*payload).profile).val;
       *((int8_t*)(ptr + (24+16*sizeof(void*)))) = 1;
-      *((int32_t*)(ptr + (28+16*sizeof(void*)))) = *payload15;
+      *((int32_t*)(ptr + (28+16*sizeof(void*)))) = *payload16;
     } else {
       *((int8_t*)(ptr + (24+16*sizeof(void*)))) = 0;
     }
     if (((*payload).level).is_some) {
-      const int32_t *payload17 = &((*payload).level).val;
+      const int32_t *payload18 = &((*payload).level).val;
       *((int8_t*)(ptr + (32+16*sizeof(void*)))) = 1;
-      *((int32_t*)(ptr + (36+16*sizeof(void*)))) = *payload17;
+      *((int32_t*)(ptr + (36+16*sizeof(void*)))) = *payload18;
     } else {
       *((int8_t*)(ptr + (32+16*sizeof(void*)))) = 0;
     }

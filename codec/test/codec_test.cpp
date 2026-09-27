@@ -13,6 +13,8 @@
 //       --batch N         frames per encode call (default 1)
 //       --tb NUM/DEN      the stream's time base (default: the y4m's frame
 //                         period, so one frame is one tick)
+//       --rate NUM/DEN    the frame rate init is told (default: none, so a
+//                         bitrate becomes a size by the frames' durations)
 //       --no-duration     frames carry no duration
 //       --packets FILE    write the packets, each as a u32 size and the bytes
 
@@ -81,16 +83,19 @@ ffrwd_av_types_stream_info_t stream_info(int32_t num, int32_t den)
 	return info;
 }
 
-// Init an encoder; on success `coded` holds what it answered.
+// Init an encoder; on success `coded` holds what it answered. A `rate_num`
+// of 0 passes no frame rate.
 bool encoder_init(uint32_t width, uint32_t height, const char *pix_fmt, int32_t num, int32_t den,
-                  const std::string &params, ffrwd_av_types_coded_stream_t *coded, std::string *error)
+                  const std::string &params, ffrwd_av_types_coded_stream_t *coded, std::string *error,
+                  int32_t rate_num = 0, int32_t rate_den = 0)
 {
 	error->clear();
 	auto format = video_format(width, height, pix_fmt);
 	auto info = stream_info(num, den);
+	ffrwd_av_types_rational_t rate = { rate_num, rate_den };
 	auto p = str(params);
 	codec_string_t err = {};
-	if (exports_ffrwd_av_encoder_init(&format, &info, &p, coded, &err))
+	if (exports_ffrwd_av_encoder_init(&format, &info, rate_num ? &rate : nullptr, &p, coded, &err))
 		return true;
 	*error = text(err);
 	codec_string_free(&err);
@@ -256,6 +261,106 @@ int run_checks()
 		      "bytes_per_frame 3000 wins over bitrate 1");
 	}
 
+	// The frame rate. The Budget itself first, for exact sizes.
+	{
+		using pyrowave_codec::Budget;
+		using pyrowave_codec::EncoderParams;
+		EncoderParams params;
+		std::string why;
+		size_t bytes = 0;
+		Budget budget;
+
+		params.bitrate = 1200000;
+		budget.init(params, 1, 90000, 30, 1, 1 << 20);
+		bool got = budget.next(-1, -1, &bytes, &why);
+		check(got && bytes == 5000, ("budget: rate 30/1, bitrate 1200000, no duration at 1/90000: 5000 bytes, got " +
+		                             std::to_string(bytes) + " " + why).c_str());
+		got = budget.next(1500, -1, &bytes, &why);
+		check(got && bytes == 5000, ("budget: the rate wins over a frame's own duration: 5000 bytes, got " +
+		                             std::to_string(bytes)).c_str());
+
+		budget.init(params, 1, 30, 0, 0, 1 << 20);
+		got = budget.next(1, -1, &bytes, &why);
+		check(got && bytes == 5000,
+		      ("budget: no rate, duration 1 at 1/30: 5000 bytes, got " + std::to_string(bytes)).c_str());
+		got = budget.next(-1, 2, &bytes, &why);
+		check(got && bytes == 10000, ("budget: no rate, no duration, a gap of 2 at 1/30: 10000 bytes, got " +
+		                              std::to_string(bytes)).c_str());
+		budget.init(params, 1, 90000, 0, 0, 1 << 20);
+		got = budget.next(-1, -1, &bytes, &why);
+		check(!got && contains(why, "bytes_per_frame"),
+		      ("budget: no rate, no duration at 1/90000 asks for bytes_per_frame: " + why).c_str());
+		budget.init(params, 1, 90000, 0, 1, 1 << 20);
+		got = budget.next(3000, -1, &bytes, &why);
+		check(got && bytes == 5000,
+		      ("budget: a rate of 0/1 counts as none, 3000 ticks at 1/90000: 5000 bytes, got " +
+		       std::to_string(bytes)).c_str());
+
+		params.bitrate = 14400000;
+		budget.init(params, 1001, 30000, 30000, 1001, 1 << 20);
+		got = budget.next(-1, -1, &bytes, &why);
+		check(got && bytes == 60060, ("budget: rate 30000/1001, bitrate 14400000: 60060 bytes, got " +
+		                              std::to_string(bytes)).c_str());
+		budget.init(params, 1, 90000, 30000, 1001, 1 << 20);
+		got = budget.next(3003, -1, &bytes, &why);
+		check(got && bytes == 60060, ("budget: rate 30000/1001 at 1/90000: 60060 bytes, got " +
+		                              std::to_string(bytes)).c_str());
+		budget.init(params, 1, 90000, 30000, 1001, 40000);
+		got = budget.next(-1, -1, &bytes, &why);
+		check(got && bytes == 40000,
+		      ("budget: a rate's size is still capped: 40000 bytes, got " + std::to_string(bytes)).c_str());
+		params.bitrate = 1;
+		budget.init(params, 1, 30, 30, 1, 1 << 20);
+		got = budget.next(-1, -1, &bytes, &why);
+		check(got && bytes == 1024,
+		      ("budget: a rate's size is still floored: 1024 bytes, got " + std::to_string(bytes)).c_str());
+		params.bitrate = 1200000;
+		params.bytes_per_frame = 3000;
+		budget.init(params, 1, 30, 60, 1, 1 << 20);
+		got = budget.next(-1, -1, &bytes, &why);
+		check(got && bytes == 3000,
+		      ("budget: bytes_per_frame wins over a rate: 3000 bytes, got " + std::to_string(bytes)).c_str());
+	}
+
+	// Then through the exports: a rate given at init sets the packets' size.
+	ok = encoder_init(w, h, "yuv420p", 1, 90000, "{\"bitrate\":1200000}", &coded, &error, 30, 1);
+	check(ok, ("encoder init with a frame rate of 30/1: " + error).c_str());
+	if (ok)
+	{
+		ffrwd_av_types_coded_stream_free(&coded);
+		std::vector<size_t> sizes;
+		// The lone frame with no duration at 1/90000 that is refused with
+		// no rate.
+		error = encode_frames(frame, 1, 0, false, &sizes);
+		check(error.empty() && sizes.size() == 1 && sizes[0] <= 5000 && sizes[0] > 2000,
+		      ("rate 30/1: a lone frame with no duration at 1/90000 is at most 5000 bytes, got " +
+		       (sizes.empty() ? std::string("none") : std::to_string(sizes[0])) + " " + error).c_str());
+	}
+	ok = encoder_init(w, h, "yuv420p", 1, 30, "{\"bitrate\":1200000}", &coded, &error, 60, 1);
+	check(ok, ("encoder init with a frame rate of 60/1: " + error).c_str());
+	if (ok)
+	{
+		ffrwd_av_types_coded_stream_free(&coded);
+		std::vector<size_t> sizes;
+		// Durations of 1/30 s would give 5000 bytes; the rate gives 2500.
+		error = encode_frames(frame, 2, 0, true, &sizes);
+		check(error.empty() && sizes.size() == 2 && sizes[0] <= 2500 && sizes[0] > 1024,
+		      ("rate 60/1 over durations of 1/30: at most 2500 bytes, got " +
+		       (sizes.empty() ? std::string("none") : std::to_string(sizes[0])) + " " + error).c_str());
+	}
+	ok = encoder_init(w, h, "yuv420p", 1001, 30000, "{\"bitrate\":1200000}", &coded, &error, 30000, 1001);
+	check(ok, ("encoder init with a frame rate of 30000/1001: " + error).c_str());
+	if (ok)
+	{
+		ffrwd_av_types_coded_stream_free(&coded);
+		std::vector<size_t> sizes;
+		// 1200000 * 1001 / 30000 / 8 = 5005 bytes.
+		error = encode_frames(frame, 2, 0, false, &sizes);
+		check(error.empty() && sizes.size() == 2 && sizes[0] <= 5005 && sizes[0] > 2000,
+		      ("rate 30000/1001: at most 5005 bytes, got " +
+		       (sizes.empty() ? std::string("none") : std::to_string(sizes[0])) + " " + error).c_str());
+	}
+
 	ffrwd_av_types_format_t format;
 	std::vector<uint8_t> header = { 'P', 'Y', 'R', 'W', 1, 16, 1, 0, 0, 1, 0, 0, 144, 0, 0, 0 };
 	auto cs = coded_stream(w, h, header);
@@ -387,12 +492,13 @@ int run_roundtrip(int argc, char **argv)
 	if (argc < 4)
 	{
 		fprintf(stderr, "usage: %s roundtrip <in.y4m> <out.y4m> [--params JSON] [--batch N] [--tb NUM/DEN] "
-		                "[--no-duration] [--packets FILE]\n", argv[0]);
+		                "[--rate NUM/DEN] [--no-duration] [--packets FILE]\n", argv[0]);
 		return 2;
 	}
 	std::string params = "{}";
 	size_t batch = 1;
 	int tb_num = 0, tb_den = 0;
+	int rate_num = 0, rate_den = 0;
 	bool durations = true;
 	const char *packets_path = nullptr;
 	for (int i = 4; i < argc; i++)
@@ -404,6 +510,8 @@ int run_roundtrip(int argc, char **argv)
 			batch = size_t(atoi(argv[++i]));
 		else if (arg == "--tb" && i + 1 < argc)
 			sscanf(argv[++i], "%d/%d", &tb_num, &tb_den);
+		else if (arg == "--rate" && i + 1 < argc)
+			sscanf(argv[++i], "%d/%d", &rate_num, &rate_den);
 		else if (arg == "--no-duration")
 			durations = false;
 		else if (arg == "--packets" && i + 1 < argc)
@@ -436,7 +544,8 @@ int run_roundtrip(int argc, char **argv)
 	ffrwd_av_types_coded_stream_t coded;
 	std::string error;
 	double t0 = now_ms();
-	if (!encoder_init(in.width, in.height, in.pix_fmt.c_str(), tb_num, tb_den, params, &coded, &error))
+	if (!encoder_init(in.width, in.height, in.pix_fmt.c_str(), tb_num, tb_den, params, &coded, &error, rate_num,
+	                  rate_den))
 	{
 		fprintf(stderr, "encoder init: %s\n", error.c_str());
 		return 1;
@@ -572,11 +681,12 @@ int run_roundtrip(int argc, char **argv)
 
 	double seconds = double(frames_done) * in.fps_den / in.fps_num;
 	printf("{\"frames\":%zu,\"width\":%u,\"height\":%u,\"pix_fmt\":\"%s\",\"time_base\":\"%d/%d\","
-	       "\"params\":%s,\"batch\":%zu,\"extradata\":\"%s\",\"bytes\":%zu,\"min_bytes\":%zu,\"max_bytes\":%zu,"
+	       "\"frame_rate\":\"%d/%d\",\"params\":%s,\"batch\":%zu,\"extradata\":\"%s\",\"bytes\":%zu,"
+	       "\"min_bytes\":%zu,\"max_bytes\":%zu,"
 	       "\"mean_bytes\":%.1f,\"bitrate\":%.0f,\"encode_init_ms\":%.1f,\"decode_init_ms\":%.1f,"
 	       "\"encode_ms_per_frame\":%.3f,\"decode_ms_per_frame\":%.3f}\n",
-	       frames_done, in.width, in.height, in.pix_fmt.c_str(), tb_num, tb_den, params.c_str(), batch,
-	       extradata.c_str(), bytes, frames_done ? min_bytes : 0, max_bytes,
+	       frames_done, in.width, in.height, in.pix_fmt.c_str(), tb_num, tb_den, rate_num, rate_den, params.c_str(),
+	       batch, extradata.c_str(), bytes, frames_done ? min_bytes : 0, max_bytes,
 	       frames_done ? double(bytes) / frames_done : 0.0, seconds > 0 ? bytes * 8.0 / seconds : 0.0, t_enc_init,
 	       t_dec_init, frames_done ? encode_ms / frames_done : 0.0, frames_done ? decode_ms / frames_done : 0.0);
 	return 0;

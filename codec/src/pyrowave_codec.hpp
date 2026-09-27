@@ -80,21 +80,29 @@ bool parse_encoder_params(const std::string &text, EncoderParams *params, std::s
 bool parse_decoder_params(const std::string &text, std::string *error);
 
 // Turns the params into a byte budget per frame. With bytes_per_frame set
-// that is the budget. Otherwise it is the bitrate over the frame's duration:
-// the frame's own, else the gap to the next frame's pts, else the last
-// duration seen, else one tick of the time base when the time base reads
-// as a frame rate (1 to 240 per second).
+// that is the budget. Otherwise, with the stream's nominal frame rate known,
+// it is the bitrate over that rate, the same for every frame. With no rate it
+// is the bitrate over the frame's duration: the frame's own, else the gap to
+// the next frame's pts, else the last duration seen, else one tick of the
+// time base when the time base reads as a frame rate (1 to 240 per second).
 class Budget
 {
 public:
-	void init(const EncoderParams &params, int32_t tb_num, int32_t tb_den, size_t max_bytes);
+	// `rate_num`/`rate_den` is the frame rate in frames per second; 0/0
+	// when the host gave none.
+	void init(const EncoderParams &params, int32_t tb_num, int32_t tb_den, int32_t rate_num, int32_t rate_den,
+	          size_t max_bytes);
 	// `duration` and `gap` are in time base ticks; negative when unknown.
 	bool next(int64_t duration, int64_t gap, size_t *bytes, std::string *error);
 
 private:
+	size_t clamp(double size) const;
+
 	EncoderParams params;
 	int32_t tb_num = 1;
 	int32_t tb_den = 1;
+	int32_t rate_num = 0;
+	int32_t rate_den = 0;
 	size_t max_bytes = 0;
 	int64_t last_duration = -1;
 };
