@@ -2,29 +2,42 @@
 
 [PyroWave](https://github.com/Themaister/pyrowave), the GPU wavelet codec, as
 ffrwd sidecar modules. The codec is the WebGPU port in the fork at
-https://github.com/imbcmdth/pyrowave (branch `webgpu`), compiled with wasi-sdk
+https://github.com/imbcmdth/pyrowave (branch `gpu-textures`), compiled with wasi-sdk
 to a wasm32-wasip2 component that reaches the GPU through `wasi:webgpu`. The
 sidecar hosts that interface for a module granted `-gpu`.
 
-The package has two modules:
+The package has three modules:
 
 * `modules/pyrowave.wasm`, the codec: an encoder and a decoder in one
   component, on ffrwd:av 0.18.0's `codec-module` world. The lib calls them
   `encode` and `decode`; the codec is `pyrowave` and its tag on the wire is
   `PYRW`.
+* `modules/pyrowave_gpu.wasm`, the same codec built from the same source
+  with ffrwd:gpu's `encoder` and `decoder` beside ffrwd:av's: where the
+  sidecar holds the pictures on the GPU, they are handed over and back as
+  textures of its device, and nothing but the packets crosses host memory.
+  The lib calls them `encode_gpu` and `decode_gpu`.
 * `modules/pyrowave_roundtrip.wasm`, a round trip on ffrwd:av 0.18.0's
   `video-module` world: each frame is encoded at a chosen size and decoded
   again, and the decoded picture is what comes out. It shows what a rate
   costs.
 
-Both need ffrwd 0.24.0 or newer (see Running).
+`pyrowave.wasm` and `pyrowave_roundtrip.wasm` need ffrwd 0.24.0 or newer
+(see Running). `pyrowave_gpu.wasm` reads and writes bytes on any of them,
+and textures on a sidecar that hosts ffrwd:gpu's codec interfaces, which no
+released ffrwd does yet.
 
 ## Layout
 
 * `codec/`: the codec module. `codec/src/pyrowave_codec.cpp` holds the
   extradata header, the params, the size per frame and the GPU encoder and
   decoder; `codec/src/codec.cpp` is the glue to the `encoder` and `decoder`
-  exports. `codec/wit/deps/ffrwd-av/av.wit` is the CLI's `sidecar/wit/av.wit`
+  exports, and, built with `PYROWAVE_GPU`, to ffrwd:gpu's. `codec/wit-gpu/`
+  is the GPU build's world, whose deps are the bytes build's `av.wit`, the
+  CLI's `sidecar/wit-gpu/gpu.wit` (ffrwd:gpu 0.1.0) and the WIT it pulls in,
+  with `webgpu-wasi`'s copy of `wasi:webgpu`; `codec/generated-gpu/` is
+  wit-bindgen's C output for it. The world is named `codec` like the bytes
+  build's, so both generate the same C names. `codec/wit/deps/ffrwd-av/av.wit` is the CLI's `sidecar/wit/av.wit`
   at v0.24.0 (ffrwd:av 0.18.0, the same file `ffrwd/wasm` 0.18.0 ships), and
   `codec/generated/` is wit-bindgen's C output for it. `codec/test/` is a
   native test of the same code (see Testing).
@@ -33,7 +46,9 @@ Both need ffrwd 0.24.0 or newer (see Running).
   `module/generated/` is wit-bindgen's C output for it.
 * `webgpu-wasi/`: `webgpu.h` implemented over `wasi:webgpu@0.0.1`, the part any
   C or C++ module needs to use the GPU. Self-contained, meant to move to a
-  repository of its own; see its README.
+  repository of its own; see its README. `include/webgpu/wasi.h` turns a
+  texture handle another interface hands in or out into a `WGPUTexture` and
+  back.
 * `src/codec.sql`: the lib's `encode` and `decode`. `src/pyrowave.sql`:
   `roundtrip` and `roundtrip_stats`.
 * `build.sh`, `CMakeLists.txt`: the build.
@@ -41,7 +56,8 @@ Both need ffrwd 0.24.0 or newer (see Running).
 ## Building
 
 Needs wasi-sdk 34 or newer, CMake 3.20 or newer with Ninja or make, and a
-checkout of the PyroWave fork (built against 5e80f92):
+checkout of the PyroWave fork on branch `gpu-textures` (built against
+f856bf6, which adds `pyrowave_webgpu_decoder_decode_gpu` to branch `webgpu`):
 
 ```
 WASI_SDK=/path/to/wasi-sdk PYROWAVE_DIR=/path/to/pyrowave sh build.sh
@@ -59,6 +75,16 @@ wit-bindgen c wit --world codec --out-dir generated
 wit-bindgen c wit --world roundtrip --out-dir generated
 ```
 
+and for the GPU build, from `codec/`, renaming the imports `webgpu-wasi`'s own
+bindings also define:
+
+```
+wit-bindgen c wit-gpu --world codec --out-dir generated-gpu \
+  --rename wasi:webgpu/webgpu@0.0.1=codec_webgpu \
+  --rename wasi:graphics-context/graphics-context@0.0.1=codec_graphics_context \
+  --rename wasi:io/poll@0.2.0=codec_poll
+```
+
 ## The codec
 
 `pyrowave.wasm` exports `ffrwd:av/encoder@0.18.0` and
@@ -73,6 +99,24 @@ with one frame at the packet's `pts` and duration.
 
 Each instance opens its GPU device at its first `init` and keeps it; an
 instance that runs both an encoder and a decoder shares the one device.
+
+### The GPU build
+
+`pyrowave_gpu.wasm` exports everything `pyrowave.wasm` does, and also
+`ffrwd:gpu/encoder@0.1.0` and `ffrwd:gpu/decoder@0.1.0` (the CLI's
+`sidecar/wit-gpu/gpu.wit`). ffrwd:av's `describe` and `init` open it as
+they open the bytes build. Once open, a sidecar whose pictures are on its
+device calls ffrwd:gpu's `encode` with each picture's three planes as
+`r8unorm` textures, which PyroWave samples where they are
+(`pyrowave_webgpu_encoder_encode_gpu`); its `decode` answers each picture as
+three textures the module made, into which the decoded planes are copied on
+the device (`pyrowave_webgpu_decoder_decode_gpu`). The module's device is the
+sidecar's, so nothing is copied between devices. Elsewhere it reads and
+writes bytes as `pyrowave.wasm` does, and a sidecar that hosts no ffrwd:gpu
+codec runs it that way.
+
+The packets are the bytes build's for the same pictures and params, and so
+are the pictures they decode to.
 
 ### Encoder params
 
@@ -168,6 +212,20 @@ ffrwd passes the input's frame rate to `init` (`-frame_rate 30/1` for a 30
 fps input), so `bitrate => 14400000` on a 30 fps input writes the same
 packets as `bytes_per_frame => 60000`.
 
+`encode_gpu` and `decode_gpu` are written where `encode` and `decode` are,
+with the same params:
+
+```
+WITH (video_codec ffrwd.pyrowave.encode_gpu(bytes_per_frame => 125000))
+FROM input('enc.nut', decoder => ffrwd.pyrowave.decode_gpu()) c
+```
+
+They pay off where the pictures are held on the GPU on that side: an encoder
+coding the output of a module that holds its pictures there runs in that
+module's sidecar and is handed them as textures, and a decoder whose reader
+holds them there hands them over as textures. A `PYRW` stream whose decoder
+is not named is decoded by `decode`, since both builds read the tag.
+
 The decoder is used unasked wherever a `PYRW` stream is read as frames, or
 named outright with `decoder =>`:
 
@@ -242,6 +300,11 @@ encodes a y4m through `encode`, hands the packets and the extradata to
 `decode`, and writes what comes back (`--rate NUM/DEN` passes `init` a frame
 rate). See `codec/test/CMakeLists.txt` for the build.
 
+`checks` also runs the paths `pyrowave_gpu.wasm` takes, on wgpu-native's
+textures: a frame encoded from textures decodes to the picture its bytes
+encode to, and a packet decoded into textures holds the planes its bytes
+decode to, at 4:2:0 and 4:4:4.
+
 `cmake -P codec/test/check.cmake` builds the test and runs its `checks`. It
 is the manifest's `test`, which `ffrwd publish` runs in the package's
 directory before it packs, and a CMake script so the one command works from
@@ -255,10 +318,10 @@ or `PYROWAVE_DIR` with wgpu-native in its `webgpu/external/` (or
 ## Publishing
 
 The archive `ffrwd publish` packs holds the manifest, the lib SQL
-(`src/codec.sql`, `src/pyrowave.sql`), the two modules the SQL declares
-(`modules/pyrowave.wasm`, `modules/pyrowave_roundtrip.wasm`, shipped
-although `.gitignore` names `modules/`), this README and `LICENSE`: seven
-files, about 665 kB gzipped. `.ffrwdignore` names the sources and the build,
+(`src/codec.sql`, `src/pyrowave.sql`), the three modules the SQL declares
+(`modules/pyrowave.wasm`, `modules/pyrowave_gpu.wasm`,
+`modules/pyrowave_roundtrip.wasm`, shipped although `.gitignore` names
+`modules/`), this README and `LICENSE`: eight files. `.ffrwdignore` names the sources and the build,
 which stay here. Build the modules before publishing: the archive takes
 what is in `modules/`.
 
@@ -364,3 +427,32 @@ encode 0.46 ms and decode 0.48 ms; 1080p encode 1.05 ms and decode 1.16 ms.
 The native tools take 0.42 / 0.29 ms at 720p and 0.61 / 0.46 ms at 1080p; the
 difference is moving frames and readbacks through the component boundary
 (each crosses it as a copy).
+
+### The GPU build
+
+RTX 4090, D3D12, a sidecar hosting ffrwd:gpu's codec interfaces (ffrwd-cli
+branch `pyrowave-gpu`), median of three. PyroWave's shaders need subgroups,
+which wgpu's D3D12 backend has only with DXC: `dxcompiler.dll` on the path
+and `WGPU_DX12_COMPILER=dxc` (the Windows SDK's copy).
+
+At 1080p, `pyrowave_gpu.wasm` coding the output of a module holding its
+pictures on the GPU writes the packets `pyrowave.wasm` writes, byte for
+byte, and reads nothing back where the bytes build reads 3.1 MB a frame.
+Decoding into a module holding its pictures on the GPU, its pictures are the
+bytes build's and nothing is uploaded.
+
+A stream split between two sidecars on one machine and coded at 125,000
+bytes a frame (900 frames of 1080p30, a module holding its pictures on the
+GPU on either side, `h264_d3d12va` out): 6.5 s with `pyrowave_gpu.wasm`,
+9.7 s with `pyrowave.wasm`, 3.6 s unsplit; 41.35 dB against the unsplit
+run either way.
+
+Per call at 4K (3840x2160 yuv420p, 500,000 bytes a frame, pipelines warm):
+
+| build | encode | decode | both |
+|---|---|---|---|
+| `pyrowave_gpu.wasm`, textures | 1.7 ms | 0.36 ms | 2.1 ms |
+| `pyrowave.wasm`, bytes | 8.4 ms | 6.6 ms | 14.8 ms |
+
+The GPU build's encode waits for its packet; its decode returns once the
+work is submitted, and that work lands inside the next encode's wait.

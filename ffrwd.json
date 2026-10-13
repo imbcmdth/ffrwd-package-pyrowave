@@ -22,6 +22,8 @@
   "lib": {
     "encode": "src/codec.sql",
     "decode": "src/codec.sql",
+    "encode_gpu": "src/codec.sql",
+    "decode_gpu": "src/codec.sql",
     "roundtrip": "src/pyrowave.sql",
     "roundtrip_stats": "src/pyrowave.sql"
   },

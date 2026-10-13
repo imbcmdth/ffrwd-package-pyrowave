@@ -16,3 +16,18 @@ RETURNS encoder
 -- pixel format the stream's header names.
 CREATE FUNCTION decode() RETURNS decoder
   AS 'modules/pyrowave.wasm', 'decode' LANGUAGE wasm;
+
+-- `encode_gpu` and `decode_gpu` are `encode` and `decode` built to take and
+-- hand back their pictures as textures of the sidecar's device. Where the
+-- pictures are held on the GPU on that side - a module holding them there
+-- writes them, or reads what is decoded - nothing crosses host memory but
+-- the packets; elsewhere they read and write bytes as `encode` and `decode`
+-- do. The packets are the same either way. A PYRW stream is decoded with
+-- `decode` unless `decode_gpu` is named:
+--   input('enc.nut', decoder => ffrwd.pyrowave.decode_gpu())
+CREATE FUNCTION encode_gpu(bitrate number DEFAULT 200000000, bytes_per_frame number DEFAULT NULL)
+RETURNS encoder
+  AS 'modules/pyrowave_gpu.wasm', 'encode' LANGUAGE wasm;
+
+CREATE FUNCTION decode_gpu() RETURNS decoder
+  AS 'modules/pyrowave_gpu.wasm', 'decode' LANGUAGE wasm;
