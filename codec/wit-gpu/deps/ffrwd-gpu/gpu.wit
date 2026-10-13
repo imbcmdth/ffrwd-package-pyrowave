@@ -240,7 +240,8 @@ interface nn {
   output-texture: func(context: borrow<graph-execution-context>, options: output-texture-options) -> result<gpu-texture, string>;
 }
 
-/// What a codec's encoder and decoder hand each other's host on the GPU.
+/// The pictures and packets a codec's halves exchange with a host whose
+/// pictures are on the GPU.
 interface codec-types {
   use wasi:webgpu/webgpu@0.0.1.{gpu-texture};
 
