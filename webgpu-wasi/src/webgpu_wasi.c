@@ -38,6 +38,7 @@
 // from two threads at once, and wasi-sdk's wasm32-wasip2 has none anyway.
 
 #include "webgpu/webgpu.h"
+#include "webgpu/wasi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1167,6 +1168,26 @@ WGPUTextureUsage wgpuTextureGetUsage(WGPUTexture texture) { return texture->desc
 void wgpuTextureAddRef(WGPUTexture texture) {
     if (!texture) fatal("wgpuTextureAddRef on NULL");
     texture->refCount++;
+}
+
+WGPUTexture webgpu_wasi_texture_from_handle(int32_t handle, WGPUTextureDescriptor const* descriptor) {
+    WGPUTextureImpl* texture = xcalloc(1, sizeof(WGPUTextureImpl));
+    texture->refCount = 1;
+    texture->texture.__handle = handle;
+    texture->desc = *descriptor;
+    texture->desc.label = (WGPUStringView){NULL, 0};
+    texture->desc.viewFormatCount = 0;
+    texture->desc.viewFormats = NULL;
+    texture->desc.nextInChain = NULL;
+    return texture;
+}
+
+int32_t webgpu_wasi_texture_into_handle(WGPUTexture texture) {
+    if (!texture) fatal("webgpu_wasi_texture_into_handle on NULL");
+    if (texture->refCount != 1) fatal("webgpu_wasi_texture_into_handle on a texture with other references");
+    int32_t handle = texture->texture.__handle;
+    free(texture);
+    return handle;
 }
 
 void wgpuTextureRelease(WGPUTexture texture) {
