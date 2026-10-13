@@ -48,6 +48,9 @@ bool check_shape(const StreamShape &shape, std::string *error);
 // Bytes in one tightly packed planar frame of the shape.
 size_t frame_size(const StreamShape &shape);
 
+// The size of plane `plane` (0 to 2) of a frame of the shape.
+void plane_size(const StreamShape &shape, int plane, uint32_t *width, uint32_t *height);
+
 // The extradata: a 16-byte versioned header, little-endian.
 //
 //   0  4  magic "PYRW"
@@ -131,7 +134,16 @@ public:
 	bool encode(const uint8_t *frame, size_t size, size_t budget, uint8_t *out, size_t *written,
 	            std::string *error);
 
+	// The same for a frame on the device: one r8unorm texture per plane,
+	// sampled where it is, on the device shared_device() opened.
+	bool encode_textures(const WGPUTexture planes[3], size_t budget, uint8_t *out, size_t *written,
+	                     std::string *error);
+
 private:
+	// Waits for the frame just submitted and writes it, one packet, into
+	// `out`.
+	bool packet(size_t budget, uint8_t *out, size_t *written, std::string *error);
+
 	pyrowave_webgpu_encoder encoder = nullptr;
 	StreamShape shape_;
 };
@@ -148,10 +160,21 @@ public:
 	// frame_size(shape()) bytes of room.
 	bool decode(const uint8_t *packet, size_t size, uint8_t *frame, std::string *error);
 
+	// The same into three new r8unorm textures on the device, at the planes'
+	// sizes, usable for sampling and copying; the caller owns them. The work
+	// writing them is submitted, and nothing is read back.
+	bool decode_textures(const uint8_t *packet, size_t size, WGPUTexture planes[3], std::string *error);
+
 private:
+	// Queues one packet holding one whole frame.
+	bool push(const uint8_t *packet, size_t size, std::string *error);
+
 	pyrowave_webgpu_decoder decoder = nullptr;
 	StreamShape shape_;
 };
+
+// Releases textures decode_textures made, and clears them.
+void release_textures(WGPUTexture planes[3]);
 }
 
 #endif

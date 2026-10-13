@@ -1,0 +1,11 @@
+// The codec module's GPU build: the same encoder and decoder on ffrwd:av
+// 0.18.0's codec-module world, plus ffrwd:gpu's encoder and decoder, which
+// take and hand back the planes as textures of the sidecar's device. The
+// world has the bytes build's name so the generated C names are the same and
+// codec.cpp compiles against either.
+package ffrwd:pyrowave-gpu;
+
+world codec {
+  include ffrwd:av/codec-module@0.18.0;
+  include ffrwd:gpu/codec-module@0.1.0;
+}

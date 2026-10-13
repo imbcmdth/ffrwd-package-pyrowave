@@ -5,7 +5,8 @@
 // owns and freeing what it answers.
 //
 //   pyrowave-codec-test checks
-//       The describes, and init and encode refusing what they should.
+//       The describes, and init and encode refusing what they should; and
+//       the texture paths pyrowave_gpu.wasm takes, against the byte paths.
 //   pyrowave-codec-test roundtrip <in.y4m> <out.y4m> [options]
 //       Encodes every frame of a y4m, decodes the packets again and writes
 //       what the decoder produced, with the sizes and timings on stdout.
@@ -29,6 +30,7 @@
 
 #include "codec.h"
 #include "pyrowave_codec.hpp"
+#include "webgpu/wgpu.h"
 
 extern "C" void __component_type_object_force_link_codec(void)
 {
@@ -162,6 +164,143 @@ std::string encode_frames(const std::vector<uint8_t> &frame, size_t count, int64
 		sizes->push_back(packets.ptr[i].data.len);
 	exports_ffrwd_av_encoder_list_packet_free(&packets);
 	return std::string();
+}
+
+// The planes of `texture`, read back with wgpu-native, tightly packed.
+bool read_texture(WGPUInstance instance, WGPUDevice device, WGPUTexture texture, uint32_t width, uint32_t height,
+                  std::vector<uint8_t> *out)
+{
+	uint32_t stride = (width + 255) & ~255u;
+	WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+	desc.size = uint64_t(stride) * height;
+	desc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+	WGPUBuffer buffer = wgpuDeviceCreateBuffer(device, &desc);
+	WGPUCommandEncoder cmd = wgpuDeviceCreateCommandEncoder(device, nullptr);
+	WGPUTexelCopyTextureInfo src = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+	src.texture = texture;
+	WGPUTexelCopyBufferInfo dst = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+	dst.buffer = buffer;
+	dst.layout.bytesPerRow = stride;
+	dst.layout.rowsPerImage = height;
+	WGPUExtent3D extent = { width, height, 1 };
+	wgpuCommandEncoderCopyTextureToBuffer(cmd, &src, &dst, &extent);
+	WGPUCommandBuffer commands = wgpuCommandEncoderFinish(cmd, nullptr);
+	WGPUQueue queue = wgpuDeviceGetQueue(device);
+	wgpuQueueSubmit(queue, 1, &commands);
+	wgpuCommandBufferRelease(commands);
+	wgpuCommandEncoderRelease(cmd);
+	wgpuQueueRelease(queue);
+
+	int status = 0; // 0 waiting, 1 mapped, 2 failed
+	WGPUBufferMapCallbackInfo info = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+	info.mode = WGPUCallbackMode_AllowProcessEvents;
+	info.callback = [](WGPUMapAsyncStatus result, WGPUStringView, void *userdata1, void *) {
+		*static_cast<int *>(userdata1) = result == WGPUMapAsyncStatus_Success ? 1 : 2;
+	};
+	info.userdata1 = &status;
+	wgpuBufferMapAsync(buffer, WGPUMapMode_Read, 0, size_t(desc.size), info);
+	while (!status)
+	{
+		wgpuDevicePoll(device, true, nullptr);
+		wgpuInstanceProcessEvents(instance);
+	}
+	if (status == 1)
+	{
+		auto *mapped = static_cast<const uint8_t *>(wgpuBufferGetConstMappedRange(buffer, 0, size_t(desc.size)));
+		for (uint32_t y = 0; y < height; y++)
+			out->insert(out->end(), mapped + size_t(y) * stride, mapped + size_t(y) * stride + width);
+		wgpuBufferUnmap(buffer);
+	}
+	wgpuBufferRelease(buffer);
+	return status == 1;
+}
+
+// A frame encoded from textures decodes to the picture its bytes encode to,
+// and a packet decoded into textures holds the planes the bytes decode
+// gives, at 4:2:0 and 4:4:4, at a size whose rows are no multiple of 256. The
+// packets are compared by what they decode to.
+void check_textures()
+{
+	using namespace pyrowave_codec;
+	std::string error;
+	pyrowave_webgpu_device gpu = shared_device(&error);
+	check(gpu != nullptr, ("a device for the texture paths: " + error).c_str());
+	if (!gpu)
+		return;
+	WGPUInstance instance = nullptr;
+	WGPUAdapter adapter = nullptr;
+	WGPUDevice device = nullptr;
+	pyrowave_webgpu_device_get_handles(gpu, &instance, &adapter, &device);
+	WGPUQueue queue = wgpuDeviceGetQueue(device);
+
+	for (Chroma chroma : { Chroma::C420, Chroma::C444 })
+	{
+		StreamShape shape;
+		shape.width = 200;
+		shape.height = 120;
+		shape.chroma = chroma;
+		const std::string name = pix_fmt(chroma);
+		std::vector<uint8_t> frame(frame_size(shape));
+		for (size_t i = 0; i < frame.size(); i++)
+			frame[i] = uint8_t(((i % shape.width) + 2 * ((i / shape.width) % shape.height)) & 0xff);
+
+		WGPUTexture planes[3] = {};
+		size_t offset = 0;
+		for (int plane = 0; plane < 3; plane++)
+		{
+			uint32_t pw = 0, ph = 0;
+			plane_size(shape, plane, &pw, &ph);
+			WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+			desc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+			desc.size = { pw, ph, 1 };
+			desc.format = WGPUTextureFormat_R8Unorm;
+			planes[plane] = wgpuDeviceCreateTexture(device, &desc);
+			WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+			dst.texture = planes[plane];
+			WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+			layout.bytesPerRow = pw;
+			layout.rowsPerImage = ph;
+			WGPUExtent3D extent = { pw, ph, 1 };
+			wgpuQueueWriteTexture(queue, &dst, frame.data() + offset, size_t(pw) * ph, &layout, &extent);
+			offset += size_t(pw) * ph;
+		}
+
+		// Two encoders, since a packet carries its encoder's frame count. A
+		// smooth picture under a budget it does not reach: where the budget
+		// binds on a busy picture, two 4:4:4 encodes of the same bytes can
+		// keep different coefficients from run to run.
+		const size_t budget = 40000;
+		Encoder encoder, texture_encoder;
+		std::vector<uint8_t> bytes(Encoder::capacity(budget)), textured(Encoder::capacity(budget));
+		size_t from_bytes = 0, from_textures = 0;
+		bool ok = encoder.open(shape, &error) && texture_encoder.open(shape, &error) &&
+		          encoder.encode(frame.data(), frame.size(), budget, bytes.data(), &from_bytes, &error) &&
+		          texture_encoder.encode_textures(planes, budget, textured.data(), &from_textures, &error);
+		Decoder decoder;
+		std::vector<uint8_t> decoded(frame_size(shape)), decoded_textured(frame_size(shape));
+		ok = ok && decoder.open(shape, &error) &&
+		     decoder.decode(bytes.data(), from_bytes, decoded.data(), &error) &&
+		     decoder.decode(textured.data(), from_textures, decoded_textured.data(), &error);
+		check(ok && from_textures <= budget && decoded == decoded_textured,
+		      (name + ": a frame encoded from textures decodes to the picture its bytes encode to " + error)
+		              .c_str());
+
+		WGPUTexture out[3] = {};
+		ok = ok && decoder.decode_textures(bytes.data(), from_bytes, out, &error);
+		std::vector<uint8_t> read;
+		for (int plane = 0; ok && plane < 3; plane++)
+		{
+			uint32_t pw = 0, ph = 0;
+			plane_size(shape, plane, &pw, &ph);
+			ok = read_texture(instance, device, out[plane], pw, ph, &read);
+		}
+		check(ok && read == decoded,
+		      (name + ": a packet decoded into textures holds the planes its bytes decode to " + error).c_str());
+		release_textures(out);
+		for (auto texture : planes)
+			wgpuTextureRelease(texture);
+	}
+	wgpuQueueRelease(queue);
 }
 
 bool contains(const std::string &haystack, const char *needle)
@@ -413,6 +552,8 @@ int run_checks()
 		else
 			exports_ffrwd_av_decoder_list_raw_frame_free(&frames);
 	}
+
+	check_textures();
 
 	pyrowave_codec::release_shared_device();
 	printf("%s: %d failed\n", failures ? "FAILED" : "passed", failures);

@@ -8,8 +8,8 @@
 #   cmake --build build
 #
 # build.sh does the same. The modules land in build/module/pyrowave_roundtrip.wasm
-# (the round-trip filter) and build/codec/pyrowave.wasm (the encoder and
-# decoder).
+# (the round-trip filter), build/codec/pyrowave.wasm (the encoder and decoder)
+# and build/codec/pyrowave_gpu.wasm (the same, its pictures as textures).
 
 cmake_minimum_required(VERSION 3.20)
 project(ffrwd-pyrowave LANGUAGES C CXX)
@@ -21,7 +21,7 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
 	message(FATAL_ERROR "Build with wasi-sdk's toolchain file (wasi-sdk-p2.cmake): the modules are wasm32-wasip2 components.")
 endif()
 
-# The PyroWave fork carrying the WebGPU port (branch webgpu). Only its
+# The PyroWave fork carrying the WebGPU port (branch gpu-textures). Only its
 # webgpu/ directory and the Granite-free bitstream code it compiles are used.
 set(PYROWAVE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../pyrowave" CACHE PATH "PyroWave checkout with the webgpu/ port")
 if (NOT EXISTS "${PYROWAVE_DIR}/webgpu/CMakeLists.txt")

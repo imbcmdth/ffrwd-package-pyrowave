@@ -456,7 +456,33 @@ bool Encoder::encode(const uint8_t *frame, size_t size, size_t budget, uint8_t *
 		*error = failed("encode", result);
 		return false;
 	}
-	result = pyrowave_webgpu_encoder_poll(encoder, true);
+	return packet(budget, out, written, error);
+}
+
+bool Encoder::encode_textures(const WGPUTexture planes[3], size_t budget, uint8_t *out, size_t *written,
+                              std::string *error)
+{
+	if (!encoder)
+	{
+		*error = "the encoder was not opened";
+		return false;
+	}
+	pyrowave_webgpu_gpu_input input = {};
+	for (int plane = 0; plane < 3; plane++)
+		input.planes[plane] = planes[plane];
+	pyrowave_webgpu_rate_control rate = { budget };
+	auto result = pyrowave_webgpu_encoder_encode_gpu(encoder, &input, &rate);
+	if (result != PYROWAVE_WEBGPU_SUCCESS)
+	{
+		*error = failed("encode", result);
+		return false;
+	}
+	return packet(budget, out, written, error);
+}
+
+bool Encoder::packet(size_t budget, uint8_t *out, size_t *written, std::string *error)
+{
+	auto result = pyrowave_webgpu_encoder_poll(encoder, true);
 	if (result != PYROWAVE_WEBGPU_SUCCESS)
 	{
 		*error = failed("encode readback", result);
@@ -526,6 +552,25 @@ bool Decoder::decode(const uint8_t *packet, size_t size, uint8_t *frame, std::st
 		*error = "the decoder was not opened";
 		return false;
 	}
+	if (!push(packet, size, error))
+		return false;
+	pyrowave_webgpu_cpu_buffer cpu = planes(shape_, frame);
+	auto result = pyrowave_webgpu_decoder_decode_cpu(decoder, &cpu);
+	if (result != PYROWAVE_WEBGPU_SUCCESS)
+	{
+		*error = failed("decode", result);
+		return false;
+	}
+	return true;
+}
+
+bool Decoder::push(const uint8_t *packet, size_t size, std::string *error)
+{
+	if (!decoder)
+	{
+		*error = "the decoder was not opened";
+		return false;
+	}
 	// Every packet is a whole frame and stands alone: forget the previous
 	// one's sequence number, so that the parser's ordering (a 3-bit counter
 	// that drops a frame it thinks is late) never discards one.
@@ -541,13 +586,63 @@ bool Decoder::decode(const uint8_t *packet, size_t size, uint8_t *frame, std::st
 		*error = "a packet does not hold a whole frame";
 		return false;
 	}
-	pyrowave_webgpu_cpu_buffer cpu = planes(shape_, frame);
-	result = pyrowave_webgpu_decoder_decode_cpu(decoder, &cpu);
+	return true;
+}
+
+void plane_size(const StreamShape &shape, int plane, uint32_t *width, uint32_t *height)
+{
+	bool half = plane != 0 && shape.chroma == Chroma::C420;
+	*width = half ? shape.width / 2 : shape.width;
+	*height = half ? shape.height / 2 : shape.height;
+}
+
+bool Decoder::decode_textures(const uint8_t *packet, size_t size, WGPUTexture planes[3], std::string *error)
+{
+	for (int plane = 0; plane < 3; plane++)
+		planes[plane] = nullptr;
+	if (!push(packet, size, error))
+		return false;
+	WGPUInstance instance = nullptr;
+	WGPUAdapter adapter = nullptr;
+	WGPUDevice gpu = nullptr;
+	pyrowave_webgpu_device_get_handles(device, &instance, &adapter, &gpu);
+	pyrowave_webgpu_gpu_output output = {};
+	for (int plane = 0; plane < 3; plane++)
+	{
+		WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+		desc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc;
+		desc.dimension = WGPUTextureDimension_2D;
+		plane_size(shape_, plane, &desc.size.width, &desc.size.height);
+		desc.size.depthOrArrayLayers = 1;
+		desc.format = WGPUTextureFormat_R8Unorm;
+		desc.mipLevelCount = 1;
+		desc.sampleCount = 1;
+		planes[plane] = wgpuDeviceCreateTexture(gpu, &desc);
+		if (!planes[plane])
+		{
+			release_textures(planes);
+			*error = "no texture for a decoded plane";
+			return false;
+		}
+		output.planes[plane] = planes[plane];
+	}
+	auto result = pyrowave_webgpu_decoder_decode_gpu(decoder, &output);
 	if (result != PYROWAVE_WEBGPU_SUCCESS)
 	{
+		release_textures(planes);
 		*error = failed("decode", result);
 		return false;
 	}
 	return true;
+}
+
+void release_textures(WGPUTexture planes[3])
+{
+	for (int plane = 0; plane < 3; plane++)
+	{
+		if (planes[plane])
+			wgpuTextureRelease(planes[plane]);
+		planes[plane] = nullptr;
+	}
 }
 }

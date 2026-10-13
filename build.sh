@@ -4,8 +4,9 @@
 #   WASI_SDK=<wasi-sdk 34+ install> PYROWAVE_DIR=<pyrowave checkout> sh build.sh [build-dir]
 #
 # PYROWAVE_DIR defaults to ../pyrowave, a checkout of the fork carrying the
-# WebGPU port (https://github.com/imbcmdth/pyrowave, branch webgpu; this was
-# built against 5e80f92). The modules are copied to modules/ when done.
+# WebGPU port (https://github.com/imbcmdth/pyrowave, branch gpu-textures, which
+# adds decoding into textures to branch webgpu; this was built against
+# f856bf6). The modules are copied to modules/ when done.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -29,7 +30,7 @@ cmake -S "$here" -B "$build" -G "$generator" \
 cmake --build "$build" --parallel
 
 mkdir -p "$here/modules"
-for module in module/pyrowave_roundtrip.wasm codec/pyrowave.wasm; do
+for module in module/pyrowave_roundtrip.wasm codec/pyrowave.wasm codec/pyrowave_gpu.wasm; do
 	cp "$build/$module" "$here/modules/$(basename "$module")"
 	echo "built $here/modules/$(basename "$module")"
 done
