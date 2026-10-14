@@ -22,10 +22,11 @@ The package has three modules:
   again, and the decoded picture is what comes out. It shows what a rate
   costs.
 
-`pyrowave.wasm` and `pyrowave_roundtrip.wasm` need ffrwd 0.24.0 or newer
-(see Running). `pyrowave_gpu.wasm` reads and writes bytes on any of them,
-and textures on a sidecar that hosts ffrwd:gpu's codec interfaces, which no
-released ffrwd does yet.
+The package needs ffrwd 0.30.0 or newer (see Running). `pyrowave.wasm` and
+`pyrowave_roundtrip.wasm` run on ffrwd 0.24.0 or newer, and so does
+`pyrowave_gpu.wasm` when it reads and writes bytes. It is handed textures
+only by a sidecar that hosts ffrwd:gpu's codec interfaces, and ffrwd 0.30.0
+is the first release that does.
 
 ## Layout
 
@@ -113,7 +114,8 @@ three textures the module made, into which the decoded planes are copied on
 the device (`pyrowave_webgpu_decoder_decode_gpu`). The module's device is the
 sidecar's, so nothing is copied between devices. Elsewhere it reads and
 writes bytes as `pyrowave.wasm` does, and a sidecar that hosts no ffrwd:gpu
-codec runs it that way.
+codec runs it that way. `encode_gpu` and `decode_gpu` need ffrwd 0.30, the
+first release whose sidecar hosts ffrwd:gpu's codec interfaces.
 
 The packets are the bytes build's for the same pictures and params, and so
 are the pictures they decode to.
@@ -173,15 +175,16 @@ added.
 Both modules import `wasi:webgpu`, so the sidecar refuses to run either
 without the grant (`-gpu <module>`).
 
-This needs ffrwd 0.24.0 or newer, whose sidecar hosts ffrwd:av 0.18.0's
-`encoder` and `decoder` with the encoder's `init` taking `frame-rate`; the
-manifest's `ffrwd` key says `>=0.24.0`. This version's codec does not
-instantiate on an ffrwd from before that signature. ffrwd grants `-gpu`
-itself, from the module's own imports.
+This needs ffrwd 0.30.0 or newer. Its sidecar hosts ffrwd:gpu's `encoder` and
+`decoder`, through which `encode_gpu` and `decode_gpu` are handed textures,
+and ffrwd:av 0.18.0's `encoder` and `decoder` with the encoder's `init`
+taking `frame-rate`, which ffrwd 0.24.0 added. The manifest's `ffrwd` key
+says `>=0.30.0`. This version's codec does not instantiate on an ffrwd from
+before 0.24.0. ffrwd grants `-gpu` itself, from the module's own imports.
 
 ```
-uv venv ffrwd-0.24.0
-uv pip install --python ffrwd-0.24.0 ffrwd==0.24.0
+uv venv ffrwd-0.30.0
+uv pip install --python ffrwd-0.30.0 ffrwd==0.30.0
 ```
 
 The package is public in the registry. In a project:
